@@ -1,0 +1,36 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" 
+"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+
+<svg width = "1600" height = "600" version="1.1" 
+     xmlns="http://www.w3.org/2000/svg">
+    	
+  <rect x = "60" y = "198" width="400" height="5"
+	style="stroke-width:1; stroke:rgb(0,0,0)" />
+  <!-- <rect x = "60" y = "73" width="400" height="5"
+	style="stroke-width:1; stroke:rgb(0,0,0)" /> -->
+  <rect x = "60" y = "498" width="1100" height="5"
+	style="stroke-width:1; stroke:rgb(0,0,0)" />
+  <rect x = "60" y = "360" width="400" height="5"
+	style="stroke-width:1; stroke:rgb(0,0,0)" />
+  <rect x = "600" y = "248" width="550" height="5"
+	style="stroke-width:1; stroke:rgb(0,0,0)" />
+  <rect x = "1150" y = "248" width="5" height="150"	
+	style="stroke-width:1; stroke:rgb(0,0,0)" />
+  <rect x = "800" y = "398" width="400" height="5"	
+	style="stroke-width:1; stroke:rgb(0,0,0)" />
+  <rect x = "600" y = "175" width="448" height="5"	
+	style="stroke-width:1; stroke:rgb(0,0,0)" />
+  <rect x = "743" y = "145" width="5" height="30"	
+	style="stroke-width:1; stroke:rgb(0,0,0)" />
+  <rect x = "893" y = "145" width="5" height="30"	
+	style="stroke-width:1; stroke:rgb(0,0,0)" />
+  <rect x = "1043" y = "145" width="5" height="30"	
+	style="stroke-width:1; stroke:rgb(0,0,0)" />
+  <rect x = "138" y = "450" width="5" height="50"	
+	style="stroke-width:1; stroke:rgb(0,0,0)" />
+  <rect x = "138" y = "315" width="5" height="50"	
+	style="stroke-width:1; stroke:rgb(0,0,0)" />
+  <rect x = "138" y = "150" width="5" height="50"       
+        style="stroke-width:1; stroke:rgb(0,0,0)" />
+</svg>
