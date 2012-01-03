@@ -74,7 +74,7 @@ pickleFilename = os.path.join(workingDir, basename + ".pickle")
 
 # Logging defaults
 
-loglevel = logging.DEBUG
+logLevel = logging.DEBUG
 logFormat = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
 controllers = []
@@ -83,15 +83,3 @@ guiobjects = []
 #runpy
 exec 'from %sConfig import *' % basename.replace('.py','')
 
-handler = logging.FileHandler(os.path.join(workingDir, basename + ".log"))
-formatter = logging.Formatter(logFormat)
-handler.setFormatter(formatter)
-log = logging.getLogger()
-log.addHandler(handler)
-log.setLevel(loglevel)
-
-configLog = logging.getLogger(__name__)
-
-# Now dump options to log
-
-configLog.info('backdropFilename = %s' % backdropFilename)

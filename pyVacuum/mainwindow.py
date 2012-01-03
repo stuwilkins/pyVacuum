@@ -28,27 +28,28 @@ import time
 import subprocess
 import pickle
 
-# Setup Log
-import logging as log
-
 # QT
 from PyQt4 import QtCore, QtGui, QtSvg
 from PyQt4.QtCore import *
 from PyQt4.QtGui import *
 
 # Config info
- 
-from pyVacuum.iomodules.objects import * 
-import pyVacuum
-from pyVacuum import ringbuffer
-#from pyVacuum.graph import *
+
+import config
+
+# Logfile
+
+import logging as log
+logging = log.getLogger(__name__)
+
+from iomodules.objects import * 
+import ringbuffer
 
 import ui.aboutbox as aboutbox
 
-from pyVacuum import config
 from threads import *
 
-logging = log.getLogger(__name__)
+import pyVacuum
 
 class pyVacuumAboutDialog(QtGui.QDialog):
     def __init__(self, *args):
@@ -59,6 +60,9 @@ class pyVacuumAboutDialog(QtGui.QDialog):
 class pyVacWindow(QtGui.QMainWindow):
     def __init__(self, *args):
         QtGui.QMainWindow.__init__(self, *args)
+
+        print logging
+        logging.info("Started main window")
 
         # Images are in the modules directory
         imagesdir = os.path.join(pyVacuum.__path__[0], 'images')
@@ -182,6 +186,7 @@ class pyVacWindow(QtGui.QMainWindow):
             self.connected = False
             self.connectAction.setIcon(self.flashIcon[1])
 
+
     def closeEvent(self, ev):
         self.centralWidget().pickleRingbuffers(self.pickleFile)
         for t in  self.centralWidget().thread:
@@ -267,10 +272,16 @@ class pyVac(QtGui.QWidget):
         """
         for t in self.thread:
             t.setNoUpdate(True)
-        logging.info("Stopped controllers thread")
+            logging.info("Stopped controllers thread")
+
+        for c in self.controllers:
+            c.close()
+            logging.info("Closing controller %s" % str(c))
+
         for o in self.objects:
             o.setController(None)
             o.setDefaultActions()
+            logging.info("Disconnecting object %s" % str(o))
 
     def initAll(self):
         flag = False
@@ -279,6 +290,9 @@ class pyVac(QtGui.QWidget):
             if self.controllers[x] is not None:
                 if self.controllers[x].init():
                     logging.info("Controller %d initialized" % x)
+                else:
+                    logging.warning("Controller %d (%s) failed to initialize" % 
+                                    (x,str(self.controllers[x])))
         return True
 
     def connectAll(self):

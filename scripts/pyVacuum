@@ -22,8 +22,16 @@
 import sys
 import os.path
 import signal
-from pyVacuum import mainwindow, config
+
+from pyVacuum import config
+import logging as log
+
+# Logfile
+logging = log.getLogger(__name__)
+
+from pyVacuum import mainwindow
 from PyQt4 import QtCore, QtGui
+
 try:
     import cothread
     _ct = True
@@ -33,10 +41,10 @@ except ImportError:
 def sigint_handler(*args):
     """Handler for the SIGINT signal."""
     sys.stderr.write('\n\nExiting due to ^C.....\n')
-    #if QtGui.QMessageBox.question(None, '', "Are you sure you want to quit?",
-    #                              QtGui.QMessageBox.Yes | QtGui.QMessageBox.No,
-    #                              QtGui.QMessageBox.No) == QtGui.QMessageBox.Yes:
-    QtGui.QApplication.quit()
+    if _ct:
+        Quit()
+    else:
+        QtGui.QApplication.quit()
 
 if __name__ == "__main__":
 
@@ -48,11 +56,10 @@ if __name__ == "__main__":
     # so lets add some directories to the path
 
     if not _ct:
-        print "WARNING : No EPICS support (no cothread module)"
-
+        logging.warn("No EPICS support (no cothread module)")
         app = QtGui.QApplication(sys.argv)
     else:
-        print "Using cothread for EPICS support"
+        logging.info("Using cothread for EPICS support")
         app = cothread.iqt()
     myapp = mainwindow.pyVacWindow()
     myapp.show()

@@ -23,7 +23,11 @@
 import time
 import threading
 import sys
+
+import config
+
 # Setup Log
+
 import logging as log
 logging = log.getLogger(__name__)
 

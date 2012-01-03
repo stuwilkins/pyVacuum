@@ -53,6 +53,7 @@ class pyVacuumBuild(build):
         spawn(cmd)
 
     def run(self):
+        print "RUNNING", qt_ui_files()
         for f in qt_ui_files():
             self.compile_ui(f)
 
@@ -71,6 +72,7 @@ setup(name='pyVacuum',
       #data_files=[('/etc/pyVacuum', data_files())],
 
       scripts=['scripts/pyVacuum'],
+
       cmdclass = {
         'build' : pyVacuumBuild}
      )

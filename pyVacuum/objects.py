@@ -25,8 +25,7 @@ import time
 
 from PyQt4 import Qt, QtCore, QtGui
 
-from pyVacuum.iomodules.objects import *
-from iomodules import varianmg, gammampc
+from iomodules.objects import *
 import ringbuffer
 
 import logging as log
@@ -144,14 +143,14 @@ class pyVacObject(QtGui.QWidget):
                 for action in actions.keys():
                     self.popup.addAction(action)
                 self.popup.addSeparator()
-            if self.plotable:
-                a = self.popup.addAction("Plot (Y1)")
-                a.setCheckable(True)
-                a.setChecked(False)
-                a = self.popup.addAction("Plot (Y2)")
-                a.setCheckable(True)
-                a.setChecked(False)
-                self.popup.addSeparator()
+            #if self.plotable:
+            #    a = self.popup.addAction("Plot (Y1)")
+            #    a.setCheckable(True)
+            #    a.setChecked(False)
+            #    a = self.popup.addAction("Plot (Y2)")
+            #    a.setCheckable(True)
+            #   a.setChecked(False)
+            #   self.popup.addSeparator()
         else:
             logging.warning("Failed to add actions to %s" % self.name)
             return False
@@ -171,7 +170,7 @@ class pyVacObject(QtGui.QWidget):
         returns True if sucsesful, False if there was an error
         """
         flag = False
-        #logging.debug("updateFromController() : Updating %s", self.name)
+        logging.debug("updateFromController() : Updating %s", self.name)
         if self.controller[0] is not None:
             for n in range(len(self.controller)): 
                 self.status = self.controller[n].getStatus(self.unit[n])
@@ -187,8 +186,8 @@ class pyVacObject(QtGui.QWidget):
                                           (self.value, self.valueUnits))
                     break
             
-            #if flag == False:
-            #    logging.warning("updateFromController() : %s failed to update", self.name)   
+            if flag == False:
+                logging.warning("updateFromController() : %s failed to update", self.name)   
         if not flag:
             self.valuebox.setText("")
             self.statusLabel.setText("")
@@ -274,7 +273,7 @@ class pyVacObject(QtGui.QWidget):
         self.nameLabel.show()
 
     def setValueLabel(self, x, y, align = QtCore.Qt.AlignLeft,
-                      width = 90, height = 20, fontsize = 12):
+                      width = 90, height = 20, fontsize = 10):
         self.valuebox.move(x, y)
         self.valuebox.resize(width, height)
         self.valuebox.setAlignment(align)
@@ -283,7 +282,7 @@ class pyVacObject(QtGui.QWidget):
         self.valuebox.show()
 
     def setStatusLabel(self, x, y, align = QtCore.Qt.AlignLeft,
-                       width = 90, height = 20, fontsize = 12,
+                       width = 90, height = 20, fontsize = 10,
                        frame = False):
         self.statusLabel.move(x, y)
         self.statusLabel.resize(width, height)
@@ -500,7 +499,7 @@ class pyVacChamber(pyVacObject):
         self.setValueLabel(self.border * 2, height - 150, 
                            QtCore.Qt.AlignCenter,
                            width = width - (self.border * 4),
-                           height = 40, fontsize = 24)
+                           height = 40, fontsize = 18)
         
         self.status = VacObject.ERROR
     

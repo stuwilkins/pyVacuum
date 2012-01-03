@@ -63,6 +63,9 @@ class VacObject:
     def init(self):
         self.initialized = True
         return True
+    
+    def close(self):
+        return True
 
     def isInitialized(self, chan):
         return self.initialized
