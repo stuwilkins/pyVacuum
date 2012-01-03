@@ -19,36 +19,37 @@
 #
 
 from objects import *
+from ..log import setupLog
 
-import logging as log
-logging = log.getLogger(__name__)
-logging.setLevel(log.DEBUG)
-ch = log.StreamHandler()
-ch.setLevel(log.DEBUG)
-formatter = log.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-ch.setFormatter(formatter)
-logging.addHandler(ch)
-
+logging = setupLog()
 
 import cothread
 import cothread.catools as catools
 
 class EpicsBase(VacObject):
     def __init__(self):
+        """Initialize the object. Inherits from VacObject"""
         VacObject.__init__(self)
         self.epicsSubscriptions = []
         self.needsPolling = False
 
     def getEpicsUnits(self,pvlist):
+        """Get the units of an EPICS PV List
+
+        pvlist = list of PVs
+        """
         u = []
+        flag = True
         for n,pv in enumerate(pvlist):
             s, v = self.epicsGet(pv + ".EGU", "Unk")
             if not s:
-                return False, ["Unk" for i in pvlist]
+                flag = False
+                logging.warning("Failed to get units on %s", v.name)
             u.append(v)
-        return True, u 
+        return flag, u 
 
     def addEpicsCallback(self,pv,callback):
+        """Add PV callbacks and store the subscriptions"""
         s = catools.camonitor(pv,callback, 
                               format=catools.FORMAT_CTRL,
                               notify_disconnect=True)
@@ -58,26 +59,34 @@ class EpicsBase(VacObject):
             self.epicsSubscriptions.append(s) 
 
     def closeAllEpicsCallbacks(self):
+        """Close all EPICS subscriptions"""
+        logging.debug("closeAllEpicsCallbacks() : closing callbacks")
         for s in self.epicsSubscriptions:
             s.close()
 
         return True
 
     def epicsGet(self, pv, default):
-        try:
-            s = catools.caget(pv)
-        except cothread.Timedout:
+        """Do an epics caget and return value
+
+        pv : string : process variable
+        default : string : return this is there is an error"""
+        s = catools.caget(pv, throw = False)
+        if s.ok == False:
+            logging.warning("Failed to get '%s' error = %s", s.name, str(s))
             return False, default
         return True, s
 
     def epicsPut(self, pv, val):
-        try:
-            s = catools.caput(pv, val)
-        except cothread.Timedout:
+        """Do an epics caput and return status"""
+        s = catools.caput(pv, val, throw = False)
+        if not s:
+            logging.warning("Failed caput on '%s' error = %s", s.name, str(s))
             return False
         return True
 
     def close(self):
+        logging.debug("Closing EPICS callbacks")
         self.closeAllEpicsCallbacks()
         return True
 
@@ -148,6 +157,7 @@ class EpicsGauge(EpicsBase):
         # Used for epics callbacks
         if val.ok == False:
             self.status[index] = self.ERROR
+            logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
         else:
             if self.gaugeType == "PIRG":
                 self.status[index] = self.ON
@@ -157,6 +167,7 @@ class EpicsGauge(EpicsBase):
     def updateEmissionCallback(self, val, index):
         if val.ok == False:
             self.status[index] = self.ERROR
+            logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
             return
 
         if val.enums[val] == "ON":
@@ -170,6 +181,7 @@ class EpicsGauge(EpicsBase):
     def updateDegasCallback(self, val, index):
         if val.ok == False:
             self.status[index] = self.ERROR
+            logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
             return 
         return
 
@@ -209,7 +221,6 @@ class EpicsValve(EpicsBase):
 
     def init(self):
         self.initialized = True
-
         # Setup callbacks for EPICS PVs
         s = self.addEpicsCallback(self.ipaddr, self.updateCallback)
         s = self.addEpicsCallback(self.fbkaddr, self.updateFbkCallback)
@@ -224,7 +235,7 @@ class EpicsValve(EpicsBase):
         # Used for epics callbacks
         if val.ok == False:
             self.status[index] = self.ERROR
-            logging.debug("Update for %s failed", val.name)
+            logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
             return
 
         enum = val.enums
@@ -240,7 +251,7 @@ class EpicsValve(EpicsBase):
     def updateFbkCallback(self, val, index):
         if val.ok == False:
             self.status[index] = self.ERROR
-            logging.warn("Update for %s failed", val.name)
+            logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
             return
         enum = val.enums
         newstate = enum[val]
@@ -266,12 +277,14 @@ class EpicsValve(EpicsBase):
         elif status == self.CLOSE:
             s = catools.caput(self.opaddr[unit], "CLOSE")
         else:
+            logging.error("setStatus() : Invalid status unit = %d", unit)
             return False
 
         if not s:
+            logging.error("setStatus() : Unable to set status on unit %d", unit)
             return False
         else:
-            return    
+            return True
 
     def getValue(self, unit):
         if self.status[unit] == self.OPEN:
@@ -328,24 +341,28 @@ class EpicsIonPump(EpicsBase):
             else:
                 self.status[index] = self.ERROR
         else:
+            logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
             self.status[index] = self.ERROR
 
     def updateVoltageCallback(self, val, index):
         if val.ok == True:
             self.voltages[index] = val
         else:
+            logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
             self.status[index] = self.ERROR
 
     def updateCurrentCallback(self, val, index):
         if val.ok == True:
             self.currents[index] = val
         else:
+            logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
             self.status[index] = self.ERROR
 
     def updatePressureCallback(self, val, index):
         if val.ok == True:
             self.pressures[index] = val
         else:
+            logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
             self.status[index] = self.ERROR
 
     def updateStatusCallback(self, val, index):
@@ -353,6 +370,7 @@ class EpicsIonPump(EpicsBase):
             self.status[index] = self.ON
             self.statusMessage[index] = val.enums[val]
         else:
+            logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
             self.status[index] = self.ERROR
 
     def getActions(self, chan):
@@ -394,6 +412,7 @@ class EpicsIonPump(EpicsBase):
         elif status == self.OFF:
             s = self.epicsPut(self.pvName[unit] + ":ctl:onoff", "OFF")
         else:
+            logging.error("setStatus() : Invalid status on unit %d", unit)
             return False
         return s
 
@@ -427,6 +446,7 @@ class EpicsSwitch(EpicsBase):
         # Used for epics callbacks
         if val.ok == False:
             self.status[index] = self.ERROR
+            logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
             return
 
         enum = val.enums
@@ -441,15 +461,16 @@ class EpicsSwitch(EpicsBase):
             
     def setStatus(self, unit, status):
         # Here we just write to PV
-
         if status == self.ON:
             s = self.epicsPut(self.opaddr[unit], "ON")
         elif status == self.OFF:
             s = self.epicsPut(self.opaddr[unit], "OFF")
         else:
+            logging.error("setStatus() : Invalid status on unit %d", unit)
             return False
 
         if not s:
+            logging.error("setStatus() : Unable to set status on unit %d", unit)
             return False
         
         return True
@@ -490,6 +511,7 @@ class EpicsPV(EpicsBase):
         # Used for epics callbacks
         if val.ok == False:
             self.status[index] = self.ERROR
+            logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
             return
         
         if hasattr(val, "enums"):
@@ -536,6 +558,7 @@ class EpicsTurbo(EpicsBase):
         # Used for epics callbacks
         if val.ok == False:
             self.status[index] = self.ERROR
+            logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
             return
 
         enum = val.enums
@@ -551,6 +574,7 @@ class EpicsTurbo(EpicsBase):
     def updateStatusCallback(self, val, index):
         if val.ok == False:
             self.status[index] = self.ERROR
+            logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
             return
         
         cmd = val.enums[val]
@@ -558,7 +582,7 @@ class EpicsTurbo(EpicsBase):
         if cmd == "ON":
             self.status[index] == self.ON
         elif cmd == "NO CONNECTION":
-            self.status[index] = self.ERROR
+            self.status[index] = self.FAULT
         elif cmd == "ACCELERATING":
             self.status[index] = self.ACCEL
         elif cmd == "BRAKE":
@@ -573,15 +597,16 @@ class EpicsTurbo(EpicsBase):
 
     def setStatus(self, unit, status):
         # Here we just write to PV
-
         if status == self.ON:
             s = self.epicsPut(self.opaddr[unit], "ON")
         elif status == self.OFF:
             s = self.epicsPut(self.opaddr[unit], "OFF")
         else:
+            logging.error("setStatus() : Invalid status on unit %d", unit)
             return False
 
         if not s:
+            logging.error("setStatus() : Unable to set status on unit %d", unit)
             return False
         
         return True
