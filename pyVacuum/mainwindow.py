@@ -39,8 +39,8 @@ import config
 
 # Logfile
 
-import logging as log
-logging = log.getLogger(__name__)
+from log import setupLog
+logging = setupLog(__name__)
 
 from iomodules.objects import * 
 import ringbuffer
@@ -61,7 +61,6 @@ class pyVacWindow(QtGui.QMainWindow):
     def __init__(self, *args):
         QtGui.QMainWindow.__init__(self, *args)
 
-        print logging
         logging.info("Started main window")
 
         # Images are in the modules directory
@@ -73,15 +72,9 @@ class pyVacWindow(QtGui.QMainWindow):
 
         # Setup comon files
 
-        self.pickleFile = config.pickleFilename
-        self.valueLogFile = config.valueLogFilename
         self.backdropFile = config.backdropFilename
-        self.processImage = config.processImageFilename
 
         # Setup widgets
-
-        #self.qwtplot = pyVacGraphWindow(self)
-	self.qwtplot = None
 
         pyvac = pyVac(self)
         self.setCentralWidget(pyvac)
@@ -96,30 +89,23 @@ class pyVacWindow(QtGui.QMainWindow):
                     config.windowSize[1])
 
         self.setWindowTitle(config.windowTitle)
-        self.statusBar().showMessage("Ready")
+        self.statusBar().showMessage("Initializing")
         self.connected = False
 
         # Setup Actions
 
         self.aboutAction = QtGui.QAction('About', self)
-        self.exitAction = QtGui.QAction(
-        QtGui.QIcon(os.path.join(imagesdir,'exit-128.png')), 'Quit', self)
+        self.exitAction = QtGui.QAction(QtGui.QIcon(os.path.join(imagesdir,'exit-128.png')), 'Quit', self)
         self.exitAction.setShortcut('Ctrl+Q') 
-	self.graphAction = QtGui.QAction( QIcon(os.path.join(imagesdir,'graph-128.png')), 'Graph', self) 
+	
 	self.configAction = QtGui.QAction( QIcon(os.path.join(imagesdir,'config-128.png')), 'Config', self) 
 	self.connectAction = QtGui.QAction( QIcon(os.path.join(imagesdir,'connect-128.png')), 'Connect', self) 
 	self.disconnectAction = QtGui.QAction( QIcon(os.path.join(imagesdir,'stop-128.png')), 'Disconnect', self) 
-	self.logAction = QtGui.QAction( QIcon(os.path.join(imagesdir,'log-128.png')), 'Log', self)
-        self.dataAction = QtGui.QAction( QIcon(os.path.join(imagesdir,'filesaveas-128.png')), 'Log', self)
-
+	
         self.connect(self.aboutAction, QtCore.SIGNAL('triggered()'), 
                      self.showAbout)
         self.connect(self.exitAction, QtCore.SIGNAL('triggered()'), 
                      self, QtCore.SLOT('close()'))
-        #self.connect(self.graphAction, QtCore.SIGNAL('triggered()'), 
-        #             self.qwtplot, QtCore.SLOT('show()'))
-        #self.connect(self.graphAction, QtCore.SIGNAL('triggered()'), 
-        #             self.qwtplot, QtCore.SLOT('raise()'))
         self.connect(self.connectAction, QtCore.SIGNAL('triggered()'), 
                      self.connectAll)
         self.connect(self.disconnectAction, QtCore.SIGNAL('triggered()'), 
@@ -128,7 +114,6 @@ class pyVacWindow(QtGui.QMainWindow):
         menubar = self.menuBar()
         fileMenu = menubar.addMenu('&File')
         configMenu = menubar.addMenu('&Config')
-        windowMenu = menubar.addMenu('&Window')
 
         fileMenu.addAction(self.connectAction)
         fileMenu.addAction(self.disconnectAction)
@@ -138,22 +123,16 @@ class pyVacWindow(QtGui.QMainWindow):
         fileMenu.addAction(self.exitAction)
 
         configMenu.addAction(self.configAction)
-        windowMenu.addAction(self.graphAction)
         
         self.toolBar = self.addToolBar('Main')
         self.toolBar.addAction(self.exitAction)
         self.toolBar.addAction(self.configAction)
         self.toolBar.addSeparator()
-        self.toolBar.addAction(self.graphAction)
-        self.toolBar.addSeparator()
         self.toolBar.addAction(self.connectAction)
         self.toolBar.addAction(self.disconnectAction)
-        self.toolBar.addSeparator()
-        self.toolBar.addAction(self.logAction)
-        self.toolBar.addAction(self.dataAction)
 
         self.flashTimer = QtCore.QTimer(self)
-        self.flashTimer.setInterval(1000)
+        self.flashTimer.setInterval(500)
         self.connect(self.flashTimer, QtCore.SIGNAL('timeout()'),
                      self.flashIcon)
         self.flashIcon = [QIcon(os.path.join(imagesdir,"connect-flash-128.png")),
@@ -163,15 +142,13 @@ class pyVacWindow(QtGui.QMainWindow):
         self.connectAll()
 
     def showAbout(self):
-        d = pyVacuumAboutDialog()
-        d.exec_()
-
-    def graphWindow(self):
-        return self.qwtplot
+        self.aboutDialog = pyVacuumAboutDialog()
+        self.aboutDialog.exec_()
 
     def flashIcon(self):
         self.flash = self.flash ^ 1
         self.connectAction.setIcon(self.flashIcon[self.flash])
+        #self.statusBar().showMessage(time.asctime())
 
     def connectAll(self):
         if self.connected == False:
@@ -188,7 +165,6 @@ class pyVacWindow(QtGui.QMainWindow):
 
 
     def closeEvent(self, ev):
-        self.centralWidget().pickleRingbuffers(self.pickleFile)
         for t in  self.centralWidget().thread:
             t.stop()
         ev.accept()
@@ -210,27 +186,20 @@ class pyVac(QtGui.QWidget):
         else:
             self.diagram = None
 
-        # setup logger
+        # Setup update timer for dumping the widget
 
-        self.lastLogWrite = 0
-        
-        logging.info("pyVacuum started")
+        if config.process_image is not None:
+            self.dumpWidget()
+            self.dumpTimer = QtCore.QTimer(self)
+            self.dumpTimer.setInterval(1000 * config.process_image_interval)
+            self.connect(self.dumpTimer, QtCore.SIGNAL('timeout()'),
+                         self.dumpWidget)
+            self.dumpTimer.start()
+        else:
+            self.dumpTimer = None
 
-        # Configure Interval Timer
+        # Load Controllers from Config File
 
-        self.timer = QtCore.QTimer(self)
-        self.timer.setInterval(config.timerInterval)
-        self.connect(self.timer, QtCore.SIGNAL('timeout()'),
-                     self.updateAll)
-
-        self.timer2 = QtCore.QTimer(self)
-        self.timer2.setInterval(5000)
-        self.connect(self.timer2, QtCore.SIGNAL('timeout()'),
-                     self.dumpWidget)
-        #self.connect(self.timer2, QtCore.SIGNAL('timeout()'),
-        #             self.parentWidget().graphWindow().getPlot().dumpWidget)
-
-        # Load the controllers from the config file
         self.controllers = config.controllers
 
         # Setup the objects but use no controller when
@@ -242,11 +211,8 @@ class pyVac(QtGui.QWidget):
             # Make a copy and set the controller to None
             kwargs = object[1].copy()
             kwargs['controller'] = None
+            kwargs['callback'] = self.callbackFromObject
             self.objects.append(object[0](self, **kwargs)) 
-
-        # Get picked ringbuffers
-
-        self.getPickledRingbuffers(self.parentWidget().pickleFile)
 
         # Setup thread to update the controllers
         self.thread = []
@@ -255,16 +221,9 @@ class pyVac(QtGui.QWidget):
                 if c.needsPolling:
                     self.thread.append(pyVacThread(controller = c))
                     self.thread[-1].start()
-        
-        # Setup the value logger
 
-        self.setupValueLog(self.parentWidget().valueLogFile)
-
-        # Start interval timer
-
-        self.timer.start()
-        self.timer2.start()
-        logging.info("Timer started")
+    def callbackFromObject(self):
+        self.parentWidget().statusBar().showMessage("Last Updated: %s" % time.asctime())
 
     def disconnectAll(self):
         """
@@ -272,33 +231,31 @@ class pyVac(QtGui.QWidget):
         """
         for t in self.thread:
             t.setNoUpdate(True)
-            logging.info("Stopped controllers thread")
+            logging.info("disconnectAll() : Stopped controllers thread")
 
         for c in self.controllers:
             c.close()
-            logging.info("Closing controller %s" % str(c))
+            logging.info("disconnectAll() : Closing controller %s" % str(c))
 
         for o in self.objects:
             o.setController(None)
             o.setDefaultActions()
-            logging.info("Disconnecting object %s" % str(o))
+            logging.info("disconnectAll() : Disconnecting object %s" % str(o))
 
     def initAll(self):
         flag = False
         for x in range(len(self.controllers)):
-            logging.info("Trying to initialize controller %d" % x)
+            logging.info("initAll() : Trying to initialize controller %d" % x)
             if self.controllers[x] is not None:
                 if self.controllers[x].init():
-                    logging.info("Controller %d initialized" % x)
+                    logging.info("initAll() : Controller %d initialized" % x)
                 else:
-                    logging.warning("Controller %d (%s) failed to initialize" % 
+                    logging.warning("initAll() : Controller %d (%s) failed to initialize" % 
                                     (x,str(self.controllers[x])))
         return True
 
     def connectAll(self):
-        """
-        Connect to all controllers and start the thread 
-        """
+        """ Connect to all controllers and start the thread """
         # Configure Controllers and Objects
         # Stop if we cannot configure 
 
@@ -306,148 +263,50 @@ class pyVac(QtGui.QWidget):
 
         # Now see what items can be turned on!
 
-        for o in range(len(self.objectinfo)):
-            controller = self.objectinfo[o][1]['controller']
-            if controller is not None:
-                u = self.objectinfo[o][1]['unit']
-                flag = True
-                if type(controller) is not type([]):
-                    if not controller.isInitialized(u):
-                        flag = False
-                else:
-                    for c in range(len(controller)):
-                        if controller[c].isInitialized(u[c]) == False:
-                            flag = False
-                            break
+        for obj,info in zip(self.objects,self.objectinfo):
+            controller = info[1]['controller']
+            if type(controller) is not list:
+                controller = [controller]
+            unit = info[1]['unit']
+            if type(unit) is not list:
+                unit = [unit]
+            flag = True
+            for c,u in zip(controller, unit):
+                if not c.isInitialized(u):
+                    flag = False
+                    break
                 
-                if flag == True:
-                    # All controllers are init
-                    self.objects[o].setController(controller)
-                    logging.info("Controller on object %d Initialized OK" % o)
-                    # Add the actions to the devices
-                    self.objects[o].setActions()
-                else:
-                    logging.warning("Failed to initialize controller on object %d (%s)" % (o , self.objects[o].getName()))
+            if flag == True:
+                # All controllers are init
+                obj.setController(controller)
+                logging.info("connectAll() : Controller on object %s Initialized OK",str(obj))
+                # Add the actions to the devices
+                if config.controllable:
+                    obj.setActions()
+                obj.setCallbacksToControllers()
+                # At this point force update
+                obj.updateFromController()
+            else:
+                logging.warning("connectAll() : Failed to initialize controller on %s", obj.getName())
 
-        logging.info("%d controllers configured" % len(self.controllers))
-        logging.info("%d object configured" % len(self.objects))
+        logging.info("connectAll() : %d controllers configured" % len(self.controllers))
+        logging.info("connectAll() %d object configured" % len(self.objects))
         for t in self.thread:
             t.setNoUpdate(False)
-        logging.info("Started controllers thread")
         return True
-    
-    def setupValueLog(self, filename):
-        s = ""
-        for o in self.objects:
-            if o.isLoggable():
-                s = s + config.valueLogSep
-                s = s + config.valueLogStringFormat % o.getName()
-        
-        if s != "":
-            if filename is not None:
-                f = open(filename, 'a')
-                f.write('#\n# Logfile started at %s (%f)\n#\n' % 
-                        (time.asctime(), time.time()))
-                f.write('# TIME%s\n' % s)
-                f.close()
-
-    def writeValueLog(self, filename):
-        s = ""
-        for o in self.objects:
-            if o.isLoggable() == True:
-                v = o.getValue()
-                try:
-                    nval = float(v)
-                    s = s + config.valueLogSep + config.valueLogFormat % nval
-                except:
-                    s = s + config.valueLogSep + config.valueLogStringFormat % v
-            
-        if s != "":
-            if filename is not None:
-                f = open(filename, 'a')
-                f.write('%f%s\n' % (time.time(), s))
-                f.close()
 
     def dumpWidget(self):
 
-        if self.parentWidget() is not None:
-            pixmap = QtGui.QPixmap.grabWidget(self.parentWidget())
-        else:
-            pixmap = QtGui.QPixmap.grabWidget(self)
-            
-        pixmap.save(self.parentWidget().processImage)
-        
-    def updateAll(self):
+        pixmap = QtGui.QPixmap.grabWidget(self)
+        if config.process_image is not None:
+            pixmap.save(config.process_image) 
 
+    def updateAll(self):
         # Update all objects by calling update()
-        r = []
         for n in self.objects:
-            r.append(n.updateFromController())
-            n.updateRingBuffer()
+            n.updateFromController()
 
         # Write a line in the log file
-        
-        if (time.time() - self.lastLogWrite) > config.logInterval:
-            self.writeValueLog(self.parentWidget().valueLogFile)
-            self.lastLogWrite = time.time()
-
-        # Now update graph
-	"""
-        if self.parentWidget() is not None:
-            plot = self.parentWidget().graphWindow().getPlot()
-            for x in self.objects:
-                if x.getRingBuffer().nValues() > 1:
-                    data = x.getRingBuffer().get()
-                    dx = data[:,0]
-                    dy = data[:,1]
-                    plot.plotData(x.getName(), x.toYPlot(), dx, dy)
-            self.parentWidget().statusBar().showMessage("Last updated %s" % 
-                                                        time.asctime(time.localtime()))
-            plot.replot()
-	"""
-
-    def pickleRingbuffers(self, filename):
-        try:
-            f = open(filename, 'w')
-        except:
-            logging.critical("pickleRingbuffers() : Unable to write to %s" % filename)
-        
-        for o in self.objects:
-            pickle.dump(o.getName(), f)
-            pickle.dump(o.getRingBuffer(), f)
-            logging.info("pickleRingbuffers() : Pickled ringbuffer %s" % 
-                         o.getName())
-        f.close()
-
-    def getPickledRingbuffers(self, filename):
-        try:
-            f = open(filename, 'r')
-            logging.info("getPickledRingbuffers() : Opened %s for ringbuffer pickle." % filename)
-        except:
-            return False
-
-        for o in self.objects:
-            try:
-                n = pickle.load(f) 
-            except:
-                logging.critical("getPickledRingbuffers() : Could not unpickle object name") 
-                f.close()
-                return False
-
-            if n == o.getName():
-                try:
-                    rb = pickle.load(f)
-                except:
-                    f.close()
-                    logging.critical("getPickledRingbuffers() : Could not unpickle ringbuffer") 
-                    return False
-                
-
-                logging.info("getPickledRingbuffers() : Loading pickled ringbuffer for %s" % o.getName())
-                o.setRingBuffer(rb)
-                
-        f.close()
-        return True
 
     def paintEvent(self, ev):
         p = QtGui.QPainter(self)

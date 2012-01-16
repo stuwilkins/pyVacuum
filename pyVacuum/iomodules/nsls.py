@@ -136,7 +136,6 @@ class NSLSDeviceReadings:
             return (True, val)
 
         else:
-            print s[0]
             return (True, s[0].strip())
 
 class NSLSRingChannel2(VacObject):
@@ -151,6 +150,7 @@ class NSLSRingChannel2(VacObject):
             self.statusMessage = b
         else:
             self.status = self.OFF
+        self.emitCallback()
 
     def getUnits(self, unit):
         return ""
@@ -207,6 +207,7 @@ class NSLSRingStatus(VacObject):
         else:
             self.status = self.ERROR
         
+        self.emitCallback()
         return True
 
     def getUnits(self, unit):

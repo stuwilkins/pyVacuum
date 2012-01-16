@@ -50,6 +50,7 @@ class webImage(VacObject):
             return False
         
         self.image = r.read()
+        self.emitCallback()
         return True
 
     def getImage(self):

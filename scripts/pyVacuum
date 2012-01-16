@@ -38,11 +38,13 @@ try:
 except ImportError:
     _ct = False
 
+quitFunction = None
+
 def sigint_handler(*args):
     """Handler for the SIGINT signal."""
     sys.stderr.write('\n\nExiting due to ^C.....\n')
-    if _ct:
-        Quit()
+    if quitFunction is not None:
+        quitFunction()
     else:
         QtGui.QApplication.quit()
 
@@ -62,6 +64,7 @@ if __name__ == "__main__":
         logging.info("Using cothread for EPICS support")
         app = cothread.iqt()
     myapp = mainwindow.pyVacWindow()
+    quitFunction = myapp.close
     myapp.show()
     if _ct:
         cothread.WaitForQuit()

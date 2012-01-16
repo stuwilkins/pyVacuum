@@ -55,6 +55,7 @@ class NSLSRingStatus(VacObject):
             logging.warning("update() : Unable to convert float value")
             return False
 
+        self.emitCallback()
         return True
 
     def getUnits(self, unit):

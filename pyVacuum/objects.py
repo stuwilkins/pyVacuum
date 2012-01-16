@@ -28,20 +28,22 @@ from PyQt4 import Qt, QtCore, QtGui
 from iomodules.objects import *
 import ringbuffer
 
-import logging as log
-logging = log.getLogger(__name__)
+from plots import CCDTwoDPlot
+
+from log import setupLog
+logging = setupLog(__name__)
 
 class pyVacObject(QtGui.QWidget):
 
-    statusc = { VacObject.ERROR : QtGui.QColor("DarkGrey"),
-                VacObject.ON    : QtGui.QColor("Green"),
-                VacObject.OFF   : QtGui.QColor("Red"),
-                VacObject.ACCEL : QtGui.QColor("Purple"),
-                VacObject.BRAKE : QtGui.QColor("Purple"),
-                VacObject.FAULT : QtGui.QColor("DarkRed"),
-                VacObject.DEGAS : QtGui.QColor("Purple"),
-                VacObject.OPEN  : QtGui.QColor("Green"),
-                VacObject.CLOSE : QtGui.QColor("Red")}
+    statusc = { VacObject.ERROR : QtGui.QColor(QtCore.Qt.lightGray),
+                VacObject.ON    : QtGui.QColor(QtCore.Qt.darkGreen),
+                VacObject.OFF   : QtGui.QColor(QtCore.Qt.red),
+                VacObject.ACCEL : QtGui.QColor(QtCore.Qt.green),
+                VacObject.BRAKE : QtGui.QColor(QtCore.Qt.darkRed),
+                VacObject.FAULT : QtGui.QColor(QtCore.Qt.yellow),
+                VacObject.DEGAS : QtGui.QColor(QtCore.Qt.green),
+                VacObject.OPEN  : QtGui.QColor(QtCore.Qt.darkGreen),
+                VacObject.CLOSE : QtGui.QColor(QtCore.Qt.red)}
     
 
     statusText = { VacObject.ERROR : "ERROR",
@@ -65,6 +67,7 @@ class pyVacObject(QtGui.QWidget):
                  loggable = True,
                  format = "%f",
                  bufferlen = 20000,
+                 callback = None,
                  **kwargs):
 
         QtGui.QWidget.__init__(self, parent)
@@ -75,6 +78,7 @@ class pyVacObject(QtGui.QWidget):
         self.plotable = plotable
         self.loggable = loggable
         self.format = format
+        self.emitCallback = callback
 
         if type(controller) == type([]):
             self.controller = controller
@@ -88,6 +92,7 @@ class pyVacObject(QtGui.QWidget):
 
         self.name = name
         self.status = VacObject.ERROR
+        self.statusMessage = ""
         self.value = 0
         self.valueUnits = "None"
         self.yplot = 0
@@ -101,6 +106,10 @@ class pyVacObject(QtGui.QWidget):
         self.ringbuffer = ringbuffer.RingBuffer(bufferlen)
         self.ringBufferUpdate = 10
         self.lastRingBufferUpdate = 0
+
+        # Time of update
+        
+        self.lastUpdate = time.localtime()
 
         # Setup menu of actions for this control
         self.popup = QtGui.QMenu(self.name, self)
@@ -123,9 +132,7 @@ class pyVacObject(QtGui.QWidget):
         self.valuebox.hide()
 
     def setDefaultActions(self):
-        """
-        This routine clears the popup of all actions and re-initializes
-        """
+        """This routine clears the popup of all actions and re-initializes"""
         self.popup.clear()
         action = QtGui.QAction(self.name, self.popup)
         action.setEnabled(False)
@@ -133,27 +140,18 @@ class pyVacObject(QtGui.QWidget):
         self.popup.addSeparator()
 
     def setActions(self):
-        """
-        This routine reads the actions from the controller and 
-        adds them to the popup menu
-        """
+        """Reads the actions from the controller and adds them to the popup menu"""
         if self.controller != [None]:
             if self.controlable:
                 actions = self.controller[0].getActions(self.unit[0])
                 for action in actions.keys():
                     self.popup.addAction(action)
                 self.popup.addSeparator()
-            #if self.plotable:
-            #    a = self.popup.addAction("Plot (Y1)")
-            #    a.setCheckable(True)
-            #    a.setChecked(False)
-            #    a = self.popup.addAction("Plot (Y2)")
-            #    a.setCheckable(True)
-            #   a.setChecked(False)
-            #   self.popup.addSeparator()
-        else:
-            logging.warning("Failed to add actions to %s" % self.name)
-            return False
+                i = self.popup.addAction("Info")
+                i.setCheckable(False)
+                self.popup.addSeparator()
+            return True
+        return False
 
     def getController(self):
         return self.controller
@@ -164,38 +162,64 @@ class pyVacObject(QtGui.QWidget):
         else:
             self.controller = c
 
-    def updateFromController(self):
+    def setCallbacksToControllers(self):
+        """Link our callback routine to controller"""
+        flag = True
+        for c in self.controller:
+            if not c.addCallback(self.controllerCalledback):
+                logging.error("setCallbackToController() : Unable to set callback")
+                flag = False
+        return flag
+
+    def controllerCalledback(self, controller, *args, **kwargs):
+        """The controller calledback, so update!"""
+        if controller in self.controller:
+            self.updateFromController()
+        else:
+            logging.error("controllerCalledback() : BAD CALLBACK")
+
+    def updateFromController(self, controller = None, unit = None):
         """
         Read the controller and get the value, status and units
         returns True if sucsesful, False if there was an error
         """
-        flag = False
+        
         logging.debug("updateFromController() : Updating %s", self.name)
-        if self.controller[0] is not None:
-            for n in range(len(self.controller)): 
-                self.status = self.controller[n].getStatus(self.unit[n])
+        
+        flag = False
+        for c,u in zip(self.controller, self.unit):
+            if c is not None:
+                self.status = c.getStatus(u)
                 if self.status != VacObject.ERROR:
-                    flag = True
-                    self.statusMessage = self.controller[n].getStatusMessage(self.unit[n])
-                    self.statusLabel.setText(self.statusMessage)
-                    
-                if (self.status != VacObject.OFF) and (self.status != VacObject.ERROR):
-                    self.valueUnits = self.controller[n].getUnits(self.unit[n])
-                    self.value = self.controller[n].getValue(self.unit[n])
-                    self.valuebox.setText((self.format + " %s") %
-                                          (self.value, self.valueUnits))
-                    break
-            
-            if flag == False:
-                logging.warning("updateFromController() : %s failed to update", self.name)   
-        if not flag:
-            self.valuebox.setText("")
-            self.statusLabel.setText("")
-            self.status = VacObject.ERROR
-            logging.debug("updateFromController() : %s has no controller", self.name)
+                    self.statusMessage = c.getStatusMessage(u)
+                    if (self.status != VacObject.OFF):
+                        self.valueUnits = c.getUnits(u)
+                        self.value = c.getValue(u)
+                        flag = True
+                        break
+                    else:
+                        self.valuebox.setText("")
+                else:
+                    self.statusMessage = ""
+            else:
+                logging.debug("updateFromController() : %s has no controller", self.name)
+              
+        self.lastUpdate = time.localtime()
+        self.updateValueLabel()
+        self.updateStatusLabel()
+        self.updateRingBuffer()
         self.updateDisplay()
+        if self.emitCallback is not None:
+            self.emitCallback()
         self.update()
         return flag
+
+    def updateValueLabel(self):
+        self.valuebox.setText((self.format + " %s") %
+                              (self.value, self.valueUnits))
+
+    def updateStatusLabel(self):
+        self.statusLabel.setText(self.statusMessage)
 
     def updateDisplay(self):
         return
@@ -205,7 +229,7 @@ class pyVacObject(QtGui.QWidget):
 
     def updateRingBuffer(self):
         if (self.status != VacObject.OFF) and (self.status != VacObject.ERROR):
-            self.ringbuffer.append(numpy.array([time.time(), self.value]))
+            self.ringbuffer.append([time.time(), self.value])
 
     def getNameLabel(self):
         return nameLabel
@@ -220,20 +244,9 @@ class pyVacObject(QtGui.QWidget):
 
         t = ev.text()
 
-        # Check for plot events
-        if t == "Plot (Y1)":
-            if ev.isChecked():
-                self.yplot = self.yplot | 1
-            else:
-                self.yplot = self.yplot & ~1
+        if t == "Info":
+            self.showControllerInformation()
             return
-
-        if t == "Plot (Y2)":
-            if ev.isChecked():
-                self.yplot = self.yplot | 2
-            else:
-                self.yplot = self.yplot & ~2
-            return 
 
         if self.controller[0] == None:
             # Ignore this action
@@ -260,11 +273,8 @@ class pyVacObject(QtGui.QWidget):
     def setRingBuffer(self, rb):
         self.ringbuffer = rb
 
-    def toYPlot(self):
-        return self.yplot
-
     def setNameLabel(self, x, y, align = QtCore.Qt.AlignCenter,
-                     width = 90, height = 20, fontsize = 16):
+                     width = 90, height = 20, fontsize = 12):
         self.nameLabel.move(x, y)
         self.nameLabel.resize(width, height)
         self.nameLabel.setAlignment(align)
@@ -298,6 +308,35 @@ class pyVacObject(QtGui.QWidget):
         if ev.button() == QtCore.Qt.RightButton:
             self.popup.popup(self.mapToGlobal(ev.pos()))
 
+    def showControllerInformation(self):
+        a , b = self.controller[0].getInformation(self.unit[0])
+        msgBox = QtGui.QMessageBox()
+        msgBox.setIcon(QtGui.QMessageBox.Information)
+        msgBox.setText(a)
+        msgBox.setWindowTitle(self.name)
+        msgBox.setInformativeText(b)
+        msgBox.setStandardButtons(QtGui.QMessageBox.Cancel)
+        msgBox.setWindowModality(QtCore.Qt.WindowModal)
+        msgBox.exec_()
+        self.msgBoxRtn = msgBox
+
+    def mouseDoubleClickEvent(self, ev):
+        if self.controller[0] is not None:
+            type = self.controller[0].isSettable(self.unit[0])
+            if type:
+                self.inputBox = QtGui.QInputDialog(self)
+                self.inputBox.setInputMode(QtGui.QInputDialog.TextInput)
+                self.inputBox.setWindowTitle(self.name)
+                self.inputBox.setLabelText("")
+                QtCore.QObject.connect(self.inputBox, 
+                                       QtCore.SIGNAL('accepted()'),
+                                       self.inputBoxTriggered)
+                self.inputBox.exec_()
+                
+    def inputBoxTriggered(self):
+        val = self.inputBox.textValue()
+        self.controller[0].setValue(self.unit[0], str(val))
+        
     def getValue(self):
         return self.value
 
@@ -665,13 +704,17 @@ class pyVacStatusMessage(pyVacObject):
 class pyVacLCD(pyVacObject):
     def __init__(self, parent, **kwargs):
         pyVacObject.__init__(self, parent, **kwargs)
-        self.resize(100, 80)
+        if kwargs.has_key('width'):
+            width = kwargs['width']
+        else:
+            width = 100
+        self.resize(width, 80)
         self.move(kwargs['x'] - 50, kwargs['y'] - 40)
         self.active = False
-        self.setNameLabel(5, 50, QtCore.Qt.AlignCenter)
+        self.setNameLabel(5, 55, QtCore.Qt.AlignCenter, width = width, fontsize = 11)
         self.lcd = QtGui.QLCDNumber(self) 
         self.lcd.setSegmentStyle(self.lcd.Filled)
-        self.lcd.resize(100, 50)
+        self.lcd.resize(width, 50)
         self.lcd.display("Err")
         self.setColor()
         
@@ -703,29 +746,54 @@ class pyVacIndicator(pyVacObject):
         self.move(kwargs['x'] - 50, kwargs['y'] - 40)
         self.active = False
         self.setNameLabel(5, 50, QtCore.Qt.AlignCenter)
-        self.text = kwargs['statustext']
+        if kwargs.has_key('statustext'):
+            self.text = kwargs['statustext']
+        else:
+            self.text = None
     
         self.indicator = QtGui.QLabel(self)
         self.indicator.resize(90, 50)
         self.indicator.move(5,0)
         self.indicator.setAlignment(QtCore.Qt.AlignCenter)
         self.indicator.setText("UNK")
-        self.indicator.setFont(QtGui.QFont("helvetica", 18, 
+        self.indicator.setFont(QtGui.QFont("helvetica", 13, 
                                            QtGui.QFont.Bold))
         self.indicator.setAutoFillBackground(True)
         #self.indicator.set
         
     def updateDisplay(self):
-        self.indicator.setText(self.text[0])
+        
         pal = self.indicator.palette();
         pal.setColor(self.indicator.backgroundRole(),
                      self.statusc[self.status])
-        
         self.indicator.setPalette(pal)
-        if len(self.text) <= self.status:
-            status = VacObject.ERROR
+        
+        if self.text is not None:
+            self.indicator.setText(self.text[0])
+            if len(self.text) <= self.status:
+                status = VacObject.ERROR
+            else:
+                status = self.status
+            
+            self.indicator.setText(self.text[status])
         else:
-            status = self.status
+            self.indicator.setText(self.statusMessage)
             
-        self.indicator.setText(self.text[status])
-            
+class pyVacCCDImage(pyVacObject):
+    def __init__(self, parent, **kwargs):
+        pyVacObject.__init__(self, parent, **kwargs)
+        self.resize(kwargs['width'], kwargs['height'])
+        self.move(kwargs['x'], kwargs['y'])
+
+        self.plotWidget = CCDTwoDPlot(self)
+
+        
+    def updateDisplay(self):
+        if self.status == VacObject.ON:
+           self.plotWidget.setImage(self.value)
+           self.plotWidget.update()
+
+    def updateValueLabel(self):
+        """Fake this"""
+        return
+

@@ -25,15 +25,15 @@ class RingBuffer:
 	def __init__(self,size_max):
 		self.max = size_max
 		self.pos = 0
-		self.data = numpy.array([])
+		self.data = []
 		logging.debug("__init__()")
 	def append(self,x):
 		"""append an element at the end of the buffer"""
                 if self.pos == 0:
                     self.data = x
                 else:    
-                    self.data = numpy.vstack((self.data, x))
-		self.pos = self.pos + 1
+                    self.data.append(x)
+		self.pos += 1
 		if self.pos == self.max:
 			logging.debug("append() : Ringbuffer full.")
 			self.pos = 0
@@ -44,8 +44,6 @@ class RingBuffer:
 	def nValues(self):
 		return self.pos
 
-	
-
 
 class RingBufferFull(RingBuffer):
 	def __init__(self,n):
@@ -54,7 +52,7 @@ class RingBufferFull(RingBuffer):
 		self.data[self.pos] = x
 		self.pos = (self.pos + 1) % self.max
 	def get(self):
-		return numpy.vstack((self.data[self.pos:], self.data[:self.pos]))
+		return self.data[self.pos:] + self.data[:self.pos]
 	def nValues(self):
 		return self.max
 		

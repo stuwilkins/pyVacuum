@@ -19,12 +19,13 @@
 #
 
 import logging as log
+import config
 
-def setupLog():
-    logging = log.getLogger(__name__)
-    logging.setLevel(log.DEBUG)
+def setupLog(name):
+    logging = log.getLogger(name)
+    logging.setLevel(log.WARN)
     ch = log.StreamHandler()
-    ch.setLevel(log.DEBUG)
+    ch.setLevel(log.WARN)
     formatter = log.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     ch.setFormatter(formatter)
     logging.addHandler(ch)

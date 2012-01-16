@@ -20,23 +20,36 @@
 
 import sys, os, logging, logging.handlers
 import os.path
-from optparse import OptionParser
+from argparse import ArgumentParser
 
 #
 # First lets parse the commmand line
 #
 
-parser = OptionParser()
-parser.add_option("-b", "--basename", dest="basename",
-                  help="Set basename", metavar="FILE", default = None)
+parser = ArgumentParser()
+parser.add_argument("-b", "--basename", dest="basename",
+                  help="Set basename", metavar="file", default = None)
+parser.add_argument("-d", "--dump", dest="dump",
+                  help="Set dump filename", metavar="file", default = None)
+parser.add_argument("-i", "--dump-interval", dest="dumpinterval", type=int,
+                  help="Set dump interval (in seconds)", default = 10,
+                    metavar = 'interval')
+parser.add_argument("-n", "--view-only", dest="controllable",
+                    action="store_false", default = True,
+                    help="Set if the process image is controllable")
 
-(options, args) = parser.parse_args()
 
-if options.basename is None:
+parsedoptions = parser.parse_args()
+
+if parsedoptions.basename is None:
     basename = os.path.basename(sys.argv[0])
 else:
-    basename = options.basename
+    basename = parsedoptions.basename
     
+process_image = parsedoptions.dump
+process_image_interval = parsedoptions.dumpinterval
+controllable = parsedoptions.controllable
+print "Controllable = ",controllable
 workingDir = ''
 
 if os.name is 'posix':
@@ -67,10 +80,6 @@ graphWindowTitle = "pyVacuum"
 
 backdropFilename = os.path.join(workingDir, basename + ".svg")
 logFilename = os.path.join(workingDir, basename + ".log")
-valueLogFilename = os.path.join(workingDir, basename + ".dat")
-processImageFilename = os.path.join(workingDir, basename + "Process.png")
-graphImageFilename = os.path.join(workingDir, basename + "Graph.png")
-pickleFilename = os.path.join(workingDir, basename + ".pickle")
 
 # Logging defaults
 
@@ -82,4 +91,3 @@ guiobjects = []
 
 #runpy
 exec 'from %sConfig import *' % basename.replace('.py','')
-

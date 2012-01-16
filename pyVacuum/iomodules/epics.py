@@ -19,12 +19,16 @@
 #
 
 from objects import *
-from ..log import setupLog
+from pyVacuum.log import setupLog
 
-logging = setupLog()
+logging = setupLog(__name__)
 
 import cothread
 import cothread.catools as catools
+
+import time
+
+import numpy
 
 class EpicsBase(VacObject):
     def __init__(self):
@@ -32,27 +36,81 @@ class EpicsBase(VacObject):
         VacObject.__init__(self)
         self.epicsSubscriptions = []
         self.needsPolling = False
+        self.autoActions = None
 
-    def getEpicsUnits(self,pvlist):
-        """Get the units of an EPICS PV List
+    def addActionsFromPV(self,pvListList, prefix = None):
+        """Connect to controlling PV and set actions
+        
+        Note : pvListList must be a LIST of a list of pv's"""
+ 
+        # Reorder the list (transpose in matrix language!
+        pvListListT = zip(*pvListList)
+        
+        # Make dummy prefix
+        if prefix is None:
+            prefix = ['' for i in pvListList]
+        
+        allActions = []
+        allPVs = []
+        allResults = []
 
-        pvlist = list of PVs
-        """
-        u = []
-        flag = True
-        for n,pv in enumerate(pvlist):
-            s, v = self.epicsGet(pv + ".EGU", "Unk")
-            if not s:
-                flag = False
-                logging.warning("Failed to get units on %s", v.name)
-            u.append(v)
-        return flag, u 
+        for pvList in pvListListT:
+            # This loops over all "units"
+            result = catools.caget(pvList, throw = False, 
+                                   format = catools.FORMAT_CTRL,
+                                   timeout = 0.5) # Timeout short
+            actiondict = {}
+            actionpvs = []
+            results = []
+            flag = False
+            i = 0 # Index has to be unique!
+            # This loops over all PVs
+            for val,p in zip(result, prefix):
+                if val.ok:
+                    if hasattr(val,"enums"):
+                        for e in val.enums:
+                            actiondict.update({p + e:i})
+                            actionpvs.append([val.name, e])
+                            i = i + 1
+                            flag = True
+                    else:
+                        logging.error("addActionsFromPV() : BAD PV %s", val.name)
+                else:
+                    logging.warning("addActionsFromPV() : Unable to get actions for %s", val.name)
+            allActions.append(actiondict)
+            allPVs.append(actionpvs)
+            allResults.append(flag)
+        self.autoActions = {'actions' : allActions, 'PVs' : allPVs}
 
+        return allResults
+
+    def getActions(self, unit):
+        if self.autoActions is None:
+            return {}
+        else:
+            return self.autoActions['actions'][unit]
+
+    def setStatus(self, unit, status):
+        # Here we just write to PV
+        if self.autoActions is None:
+            return False
+
+        val = self.autoActions['PVs'][unit][status]
+
+        logging.debug("setStatus() : pv = %s status = %s", val[0], val[1])
+        s = catools.caput(val[0],val[1])
+        if not s:
+            logging.error("setStatus() : Unable to set status on unit %d", unit)
+            return False
+        else:
+            return True
+   
     def addEpicsCallback(self,pv,callback):
         """Add PV callbacks and store the subscriptions"""
         s = catools.camonitor(pv,callback, 
                               format=catools.FORMAT_CTRL,
                               notify_disconnect=True)
+        logging.info("addEpicsCallback() : Callback added for PV %s", pv)
         if type(s) == list:
             self.epicsSubscriptions += s
         else:
@@ -106,8 +164,11 @@ class EpicsGauge(EpicsBase):
         EpicsBase.__init__(self)
 
         self.pvName = pvName
+        self.pvNameFbk = [p + ":fbk" for p in pvName]
         self.pvNameEmission = [p + ":ctl:emission:fbk" for p in pvName]
+        self.pvNameEmissionCtl = [p + ":ctl:emission" for p in pvName]
         self.pvNameDegas = [p + ":ctl:degas:fbk" for p in pvName]
+        self.pvNameDegasCtl = [p + ":ctl:degas" for p in pvName]
 
         self.gaugeType = gaugeType
 
@@ -115,9 +176,11 @@ class EpicsGauge(EpicsBase):
         self.status = []
         self.statusMessage = []
         self.units = []
+        self.statusfbk = []
         for n in self.pvName:
             self.pressures.append(-1.0)
             self.status.append(self.ERROR)
+            self.statusfbk.append(self.ERROR)
             self.statusMessage.append("")
             self.units.append("Undef")
 
@@ -126,32 +189,43 @@ class EpicsGauge(EpicsBase):
 
     def init(self):
         self.initialized = False
-        s, self.units = self.getEpicsUnits(self.pvName)
 
         # Setup callbacks for EPICS PVs
 
+        self.addActionsFromPV([self.pvNameEmissionCtl, self.pvNameDegasCtl],
+                              ["Gauge ", "Degas "])
+        self.addEpicsCallback(self.pvNameFbk, self.updateFbkCallback)
         self.addEpicsCallback(self.pvName, self.updateCallback)
-        if (self.gaugeType == "ION") or (self.gaugeType == "PENG"):
-            self.addEpicsCallback(self.pvNameEmission, self.updateEmissionCallback)
-        if self.gaugeType == "ION":
-            self.addEpicsCallback(self.pvNameDegas, self.updateDegasCallback)
+        self.addEpicsCallback(self.pvNameEmission, self.updateEmissionCallback)
+        self.addEpicsCallback(self.pvNameDegas, self.updateDegasCallback)
         
         self.initialized = True
         return True
 
-    def getActions(self, chan):
-        if self.gaugeType == "ION":
-            dict = {"ON"       : self.ON,
-                    "OFF"      : self.OFF,
-                    "DEGAS"    : self.DEGAS,
-                    "SWAP FIL" : self.SWAPFILL}
-        elif self.gaugeType == "PENG":
-            dict = { "ON"       : self.ON,
-                     "OFF"      : self.OFF }
-        else:
-            dict = {}
+    def getInformation(self, unit):
+        text = ""
+        text += "PV : %s\n" % self.pvName[unit]
+        text += "\n"
+        text += "Status = %s\n" % self.NICETEXT[self.status[unit]]
+        text += "Feedback = %s\n" % self.NICETEXT[self.statusfbk[unit]]
+        text += "Status Text = %s\n" % self.statusMessage[unit]
+        text += "Pressure = %g\n" % self.pressures[unit]
+        return "EPICS Controlled Guage", text 
 
-        return dict
+    def updateFbkCallback(self, val, index):
+        # Used for epics callbacks
+        if val.ok == False:
+            self.status[index] = self.ERROR
+            logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
+        else:
+            if val.enums[val] == "ON":
+                self.statusfbk[index] = self.ON
+            elif val.enums[val] == "OFF":
+                self.statusfbk[index] = self.OFF
+            else:
+                self.statusfbk[index] = self.ERROR
+
+        self.emitCallback(unit = index)
 
     def updateCallback(self, val, index):
         # Used for epics callbacks
@@ -161,130 +235,116 @@ class EpicsGauge(EpicsBase):
         else:
             if self.gaugeType == "PIRG":
                 self.status[index] = self.ON
-            self.pressures[index] = val            
-        return
+            self.pressures[index] = val   
+            self.units[index] = val.units
+        
+        self.emitCallback(unit = index)
 
     def updateEmissionCallback(self, val, index):
         if val.ok == False:
             self.status[index] = self.ERROR
             logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
-            return
-
-        if val.enums[val] == "ON":
-            self.status[index] = self.ON
-        elif val.enums[val] == "OFF":
-            self.status[index] = self.OFF
         else:
-            self.status[index] = self.ERROR
-        return
+            if val.enums[val] == "ON":
+                self.status[index] = self.ON
+            elif val.enums[val] == "OFF":
+                self.status[index] = self.OFF
+            else:
+                self.status[index] = self.ERROR
+        
+        self.emitCallback(unit = index)
 
     def updateDegasCallback(self, val, index):
         if val.ok == False:
             self.status[index] = self.ERROR
             logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
-            return 
-        return
-
-    def setStatus(self, unit, status):
-        # Here we just write to PVs
-        if status == self.ON:
-            s = self.epicsPut(self.pvName[unit] + ":ctl:emission", "ON")
-        elif status == self.OFF:
-            s = self.epicsPut(self.pvName[unit] + ":ctl:emission", "OFF")
-        elif status == self.DEGAS:
-            s = self.epicsPut(self.pvName[unit] + ":ctl:degas", "ON")
-        else:
-            return False
-        return s
+        
+        self.emitCallback(unit = index)
 
     def getValue(self, unit):
         return self.pressures[unit]
 
     def getUnits(self, unit):
         return self.units[unit]
+    
+    def getStatus(self,unit):
+        if (self.status[unit] == self.ON) and (self.statusfbk[unit] == self.OFF):
+            return self.ERROR
+        if (self.status[unit] == self.OFF) and (self.statusfbk[unit] == self.ON):
+            return self.ERROR
+        return self.status[unit]
 
 class EpicsValve(EpicsBase):
-    def __init__(self, pvName = [None]):
+    def __init__(self, pvName = [None], control = None):
         EpicsBase.__init__(self)
 
-        self.ipaddr = [i + ":status" for i in pvName];
         self.opaddr = pvName
-        self.fbkaddr = [i + ":fbk" for i in pvName];
-       
+         
+        self.ipaddr = [i + ":status" for i in pvName]
+        self.fbkaddr = [i + ":fbk" for i in pvName]
+        self.valveCtrl = [False for i in pvName]
         self.status = [self.ERROR for i in self.opaddr]
         self.statusfbk = [self.ERROR for i in self.opaddr]
-
-        for n in self.opaddr:
-            self.status.append(self.ERROR)
-
-        self.initialized = False
+        self.statusText = ["" for i in self.opaddr]
 
     def init(self):
         self.initialized = True
         # Setup callbacks for EPICS PVs
+        self.valveCtrl = self.addActionsFromPV([self.opaddr], ["Valve "])
         s = self.addEpicsCallback(self.ipaddr, self.updateCallback)
         s = self.addEpicsCallback(self.fbkaddr, self.updateFbkCallback)
         return True
 
-    def getActions(self, chan):
-        dict = { "OPEN" : self.OPEN,
-                 "CLOSE" : self.CLOSE }
-        return dict
+    def getInformation(self, unit):
+        text = ""
+        text += "PV : %s" % self.opaddr[unit]
+        text += "\n"
+        text += "Status = %s\n" % self.NICETEXT[self.status[unit]]
+        text += "Feedback = %s\n" % self.NICETEXT[self.statusfbk[unit]]
+        text += "Status Text = %s\n" % self.statusText[unit]
+        return "EPICS Controlled Valve", text 
 
     def updateCallback(self, val, index):
         # Used for epics callbacks
         if val.ok == False:
             self.status[index] = self.ERROR
             logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
-            return
-
-        enum = val.enums
-        newstate = enum[val]
-        if newstate == "OPEN":
-            self.status[index] = self.OPEN
-        elif newstate == "CLOSED":
-            self.status[index] = self.CLOSE
         else:
-            self.status[index] = self.ERROR            
-        return
+            enum = val.enums
+            newstate = enum[val]
+            self.statusText[index] = newstate
+            if newstate == "OPEN":
+                self.status[index] = self.OPEN
+            elif newstate == "CLOSED":
+                self.status[index] = self.CLOSE
+            else:
+                self.status[index] = self.FAULT           
+        self.emitCallback(unit = index)
 
     def updateFbkCallback(self, val, index):
         if val.ok == False:
             self.status[index] = self.ERROR
             logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
-            return
-        enum = val.enums
-        newstate = enum[val]
-        if newstate == "OPEN":
-            self.statusfbk[index] = self.OPEN
-        elif newstate == "CLOSE":
-            self.statusfbk[index] = self.CLOSE
         else:
-            self.statusfbk[index] = self.ERROR            
-        return
+            enum = val.enums
+            newstate = enum[val]
+            if (newstate == "OPEN"):
+                self.statusfbk[index] = self.OPEN
+            elif newstate == "CLOSE":
+                self.statusfbk[index] = self.CLOSE
+            else:
+                self.statusfbk[index] = self.FAULT           
+
+        self.emitCallback(unit = index)
 
     def getStatus(self, unit):
-        if self.statusfbk[unit] != self.status[unit]:
-            return self.FAULT
+        if self.valveCtrl[unit]:
+            if self.statusfbk[unit] == self.status[unit]:
+                return self.status[unit]
+            else:
+                return self.FAULT
         else:
             return self.status[unit]
-            
-    def setStatus(self, unit, status):
-        # Here we just write to PV
-
-        if status == self.OPEN:
-            s = catools.caput(self.opaddr[unit], "OPEN")
-        elif status == self.CLOSE:
-            s = catools.caput(self.opaddr[unit], "CLOSE")
-        else:
-            logging.error("setStatus() : Invalid status unit = %d", unit)
-            return False
-
-        if not s:
-            logging.error("setStatus() : Unable to set status on unit %d", unit)
-            return False
-        else:
-            return True
 
     def getValue(self, unit):
         if self.status[unit] == self.OPEN:
@@ -319,9 +379,7 @@ class EpicsIonPump(EpicsBase):
     def init(self):
         self.initialized = False
 
-        s, self.pressuresUnits = self.getEpicsUnits(self.pvNamePressure)
-        s, self.voltagesUnits = self.getEpicsUnits(self.pvNameVoltage)
-        s, self.currentsUnits = self.getEpicsUnits(self.pvNameCurrent)
+        self.addActionsFromPV([self.pvNameOnOff], ['Pump '])
 
         self.addEpicsCallback(self.pvNameCurrent, self.updateCurrentCallback)
         self.addEpicsCallback(self.pvNameVoltage, self.updateVoltageCallback)
@@ -331,6 +389,21 @@ class EpicsIonPump(EpicsBase):
 
         self.initialized = True
         return True
+
+    def getInformation(self, unit):
+        if unit >= self.GaugeStart:
+            newunit = unit - self.GaugeStart
+        else:
+            newunit = unit
+        text = ""
+        text += "PV : %s" % self.pvName[newunit]
+        text += "\n"
+        text += "Status = %s\n" % self.NICETEXT[self.status[newunit]]
+        text += "Status Text = %s\n" % self.statusMessage[newunit]
+        text += "Pressure = %g\n" % self.pressures[newunit]
+        text += "Voltage = %f\n" % self.voltages[newunit]
+        text += "Current = %g\n" % self.currents[newunit]
+        return "EPICS Controlled IonPump", text 
 
     def updateOnOffCallback(self, val, index):
         if val.ok:
@@ -347,41 +420,50 @@ class EpicsIonPump(EpicsBase):
     def updateVoltageCallback(self, val, index):
         if val.ok == True:
             self.voltages[index] = val
+            self.voltagesUnits[index] = val.units
         else:
             logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
             self.status[index] = self.ERROR
+
+        self.emitCallback(unit = index)
 
     def updateCurrentCallback(self, val, index):
         if val.ok == True:
             self.currents[index] = val
+            self.currentsUnits[index] = val.units
         else:
             logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
             self.status[index] = self.ERROR
+
+        self.emitCallback(unit = index)
 
     def updatePressureCallback(self, val, index):
         if val.ok == True:
             self.pressures[index] = val
+            self.pressuresUnits[index] = val.units
         else:
             logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
             self.status[index] = self.ERROR
+
+        self.emitCallback(unit = index)
 
     def updateStatusCallback(self, val, index):
         if val.ok == True:
-            self.status[index] = self.ON
-            self.statusMessage[index] = val.enums[val]
+            val = val.enums[val]
+            if val == "STANDBY":
+                self.status[index] = self.OFF
+            elif val == "RUNNING":
+                self.status[index] = self.ON
+            else:
+                self.status[index] = self.FAULT
+            self.statusMessage[index] = val
+            
         else:
             logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
             self.status[index] = self.ERROR
-
-    def getActions(self, chan):
-        if chan < self.GaugeStart:
-            dict = { "ON" : self.ON ,
-                     "OFF" : self.OFF }
-        else:
-            dict = {}
-        
-        return dict
     
+        self.emitCallback(unit = index)
+
     def getValue(self, unit):
         if unit < self.GaugeStart:
             return self.currents[unit]
@@ -396,25 +478,26 @@ class EpicsIonPump(EpicsBase):
         
     def getStatus(self, unit):
         if unit < self.GaugeStart:
-            return self.status[unit]
+            s = self.status[unit]
+            return s  
         else:
-            return self.status[unit - self.GaugeStart]
+            s = self.status[unit - self.GaugeStart]
+            return s
 
     def getStatusMessage(self, unit):
         if unit < self.GaugeStart:
             return self.statusMessage[unit]
         else:
             return ""
-    def setStatus(self, unit, status):
-        # Here we just write to PVs
-        if status == self.ON:
-            s = self.epicsPut(self.pvName[unit] + ":ctl:onoff", "ON")
-        elif status == self.OFF:
-            s = self.epicsPut(self.pvName[unit] + ":ctl:onoff", "OFF")
+
+    def getActions(self, unit):
+        if unit >= self.GaugeStart:
+            u = unit - self.GaugeStart
         else:
-            logging.error("setStatus() : Invalid status on unit %d", unit)
-            return False
-        return s
+            u = unit
+
+        return EpicsBase.getActions(self, u)
+        
 
 class EpicsSwitch(EpicsBase):
     def __init__(self, pvName = [None]):
@@ -424,6 +507,7 @@ class EpicsSwitch(EpicsBase):
         self.fbkaddr = [i + ":fbk" for i in pvName];
        
         self.status = [self.ERROR for i in self.opaddr]
+        self.statusMessage = ["Error" for i in self.opaddr]
 
         for n in self.opaddr:
             self.status.append(self.ERROR)
@@ -433,47 +517,45 @@ class EpicsSwitch(EpicsBase):
 
     def init(self):
         # Setup callbacks for EPICS PVs
+        self.addActionsFromPV([self.opaddr])
         self.addEpicsCallback(self.fbkaddr, self.updateCallback)
         self.initialized = True
         return True
 
-    def getActions(self, chan):
-        dict = { "ON" : self.ON,
-                 "OFF" : self.OFF }
-        return dict
+    def getInformation(self, unit):
+        newunit = unit
+        text = ""
+        text += "PV : %s" % self.opaddr[newunit]
+        text += "\n"
+        text += "Status = %s\n" % self.NICETEXT[self.status[newunit]]
+        text += "Status Text = %s\n" % self.statusMessage[newunit]
+        return "EPICS Digital Switch", text
 
     def updateCallback(self, val, index):
         # Used for epics callbacks
+        
         if val.ok == False:
             self.status[index] = self.ERROR
             logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
-            return
-
-        enum = val.enums
-        newstate = enum[val]
-        if newstate == "ON":
-            self.status[index] = self.ON
-        elif newstate == "OFF":
-            self.status[index] = self.OFF
         else:
-            self.status[index] = self.ERROR            
-        return
-            
-    def setStatus(self, unit, status):
-        # Here we just write to PV
-        if status == self.ON:
-            s = self.epicsPut(self.opaddr[unit], "ON")
-        elif status == self.OFF:
-            s = self.epicsPut(self.opaddr[unit], "OFF")
-        else:
-            logging.error("setStatus() : Invalid status on unit %d", unit)
-            return False
+            if hasattr(val,'enums'):
+                enum = val.enums
+                newstate = enum[val]
+                self.statusMessage[index] = newstate
+            else:
+                self.statusMessage[index] = ""
+                self.status[index] = self.ERROR
+                self.emitCallback(unit = index)
+                return
 
-        if not s:
-            logging.error("setStatus() : Unable to set status on unit %d", unit)
-            return False
-        
-        return True
+            if newstate == "ON":
+                self.status[index] = self.ON
+            elif newstate == "OFF":
+                self.status[index] = self.OFF
+            else:
+                # Default is that a good value means indicator is ON
+                self.status[index] = self.ON            
+        self.emitCallback(unit = index)
 
     def getValue(self, unit):
         if self.status[unit] == self.ON:
@@ -481,47 +563,68 @@ class EpicsSwitch(EpicsBase):
         else:
             return 0
 
+    def getStatusMessage(self, unit):
+        return self.statusMessage[unit]
+
     
 class EpicsPV(EpicsBase):
-    def __init__(self, pvName = [None]):
+    def __init__(self, pvName = [None], pvNameOut = None):
         EpicsBase.__init__(self)
-
         self.ipaddr = pvName
         
         self.status = [self.ERROR for i in self.ipaddr]
         self.value = [0.0 for i in self.ipaddr]
         self.statusText = ["" for i in self.ipaddr]
+        self.units = ["Unk" for i in self.ipaddr]
+
+        if pvNameOut is None:
+            self.isSettableValue = [False for i in pvName]
+        else:
+            self.isSettableValue = [(i is not None) for i in pvNameOut]
+            self.opaddr = pvNameOut
 
         self.initialized = False
+
+    def isSettable(self, chan):
+        return self.isSettableValue[chan]
 
     def init(self):
         # Setup callbacks for EPICS PVs
         self.initialized = False
-        s, u = self.getEpicsUnits(self.ipaddr)
-        if not s:
-            return False
-        self.units = u
-
         self.addEpicsCallback(self.ipaddr, self.updateCallback)
-        
         self.initialized = True
         return True
+
+    def getInformation(self, unit):
+        newunit = unit
+        text = ""
+        text += "PV : %s" % self.ipaddr[newunit]
+        text += "\n"
+        text += "Status = %s\n" % self.NICETEXT[self.status[newunit]]
+        text += "Status Text = %s\n" % self.statusText[newunit]
+        text += "Val = %s\n" % str(self.value[newunit])
+        text += "Units = %s\n" % self.units[newunit]
+        if self.isSettableValue[newunit]:
+            text += "\nOutput PV : %s\n" % self.opaddr[newunit]
+        return "EPICS PV Value", text
 
     def updateCallback(self, val, index):
         # Used for epics callbacks
         if val.ok == False:
             self.status[index] = self.ERROR
             logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
-            return
+        else:
         
-        if hasattr(val, "enums"):
-            enum = val.enums
-            val = enum[val]
+            if hasattr(val, "units"):
+                self.units[index] = val.units
+
+            if hasattr(val, "enums"):
+                enum = val.enums
+                self.statusText[index] = enum[val]
         
         self.status[index] = self.ON
         self.value[index] = val
-       
-        return True
+        self.emitCallback(unit = index)
 
     def getValue(self, unit):
         if self.status[unit] == self.ON:
@@ -529,91 +632,180 @@ class EpicsPV(EpicsBase):
         else:
             return 0
 
+    def setValue(self, unit, val):
+        self.epicsPut(self.opaddr[unit], val)
+
+    def getUnits(self, unit):
+        return self.units[unit]
+
 class EpicsTurbo(EpicsBase):
     def __init__(self, pvName = [None]):
         EpicsBase.__init__(self)
 
         self.statusaddr = [i + ":status" for i in pvName]
         self.opaddr = [i + ":onoff" for i in pvName]
+        self.opaddrReset = [i + ":reset" for i in pvName]
         self.fbkaddr = [i + ":onoff:fbk" for i in pvName]
        
         self.status = [self.ERROR for i in self.opaddr]
-        self.statusText = ["" for i in self.opaddr]
+        self.statusfbk = [self.ERROR for i in self.opaddr]
+        self.statusText = ["Error" for i in self.opaddr]
 
         self.initialized = False
 
     def init(self):
         # Setup callbacks for EPICS PVs
-        #self.addEpicsCallback(self.fbkaddr, self.updateCallback)
+        self.addActionsFromPV([self.opaddr, self.opaddrReset], ['Pump ', 'Reset '])
+        self.addEpicsCallback(self.fbkaddr, self.updateCallback)
         self.addEpicsCallback(self.statusaddr, self.updateStatusCallback)
         self.initialized = True
         return True
 
-    def getActions(self, chan):
-        dict = { "ON" : self.ON,
-                 "OFF" : self.OFF }
-        return dict
+    def getInformation(self, unit):
+        newunit = unit
+        text = ""
+        text += "PV : %s" % self.opaddr[newunit]
+        text += "\n"
+        text += "Status = %s\n" % self.NICETEXT[self.status[newunit]]
+        text += "Status Fbk = %s\n" % self.NICETEXT[self.statusfbk[newunit]]
+        text += "Status Text = %s\n" % self.statusText[newunit]
+        return "EPICS Turbo Pump", text
 
     def updateCallback(self, val, index):
         # Used for epics callbacks
         if val.ok == False:
             self.status[index] = self.ERROR
             logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
-            return
-
-        enum = val.enums
-        newstate = enum[val]
-        if newstate == "ON":
-            self.status[index] = self.ON
-        elif newstate == "OFF":
-            self.status[index] = self.OFF
         else:
-            self.status[index] = self.ERROR            
-        return
+
+            enum = val.enums
+            newstate = enum[val]
+        
+            if newstate == "ON":
+                self.statusfbk[index] = self.ON
+            elif newstate == "OFF":
+                self.statusfbk[index] = self.OFF
+            else:
+                self.statusfbk[index] = self.ERROR            
+        
+        self.emitCallback(unit = index)
             
     def updateStatusCallback(self, val, index):
         if val.ok == False:
             self.status[index] = self.ERROR
             logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
-            return
-        
-        cmd = val.enums[val]
-        print cmd
-        if cmd == "ON":
-            self.status[index] == self.ON
-        elif cmd == "NO CONNECTION":
-            self.status[index] = self.FAULT
-        elif cmd == "ACCELERATING":
-            self.status[index] = self.ACCEL
-        elif cmd == "BRAKE":
-            self.status[index] = self.BRAKE
-        elif cmd == "FAULT":
-            self.status[index] = self.FAULT
         else:
-            self.status[index] = self.FAULT
-            self.statusText[index] = val
-
+            cmd = val.enums[val]
+            logging.debug("Status = %s (%s)", cmd, val.name)
+            if cmd == "ON":
+                self.status[index] = self.ON
+                self.statusText[index] = ""
+            elif cmd == "OFF":
+                self.status[index] = self.OFF
+                self.statusText[index] = ""
+            elif cmd == "NO CONNECTION":
+                self.status[index] = self.FAULT
+                self.statusText[index] = "No Conn."
+            elif cmd == "ACCELERATING":
+                self.status[index] = self.ACCEL
+                self.statusText[index] = "Accel."
+            elif cmd == "BRAKE":
+                self.status[index] = self.BRAKE
+                self.statusText[index] = "Brake" 
+            elif cmd == "FAULT":
+                self.status[index] = self.FAULT
+                self.statusText[index] = "Fault" 
+            else:
+                self.status[index] = self.FAULT
+                self.statusText[index] = val
+        self.emitCallback(unit = index)
         return
 
-    def setStatus(self, unit, status):
-        # Here we just write to PV
-        if status == self.ON:
-            s = self.epicsPut(self.opaddr[unit], "ON")
-        elif status == self.OFF:
-            s = self.epicsPut(self.opaddr[unit], "OFF")
+    def getStatus(self, unit):
+        if (self.status[unit] == self.ON) and (self.statusfbk[unit] == self.OFF):
+            return self.FAULT
+        if (self.status[unit] == self.OFF) and (self.statusfbk[unit] == self.ON):
+            return self.FAULT
         else:
-            logging.error("setStatus() : Invalid status on unit %d", unit)
-            return False
-
-        if not s:
-            logging.error("setStatus() : Unable to set status on unit %d", unit)
-            return False
-        
-        return True
+            return self.status[unit]
 
     def getValue(self, unit):
         if self.status[unit] == self.ON:
             return 1
         else:
             return 0
+
+    def getStatusMessage(self, unit):
+        return self.statusText[unit]
     
+
+class EpicsAreaDetectorImage(EpicsBase):
+    def __init__(self, pvName = [None]):
+        EpicsBase.__init__(self)
+
+        self.dimsaddr = [i + ":Dimensions_RBV" for i in pvName]
+        self.imageaddr = [i + ":ArrayData" for i in pvName]
+       
+        self.status = [self.ERROR for i in pvName]
+        self.statusText = ["Error" for i in pvName]
+        
+        self.arraySize = [None for i in pvName]
+        self.value = [None for i in pvName]
+
+        self.initialized = False
+
+    def init(self):
+        # Setup callbacks for EPICS PVs
+        self.addEpicsCallback(self.dimsaddr, self.updateCallback)
+        self.addEpicsCallback(self.imageaddr, self.updateImageCallback)
+        self.initialized = True
+        return True
+
+    def getInformation(self, unit):
+        newunit = unit
+        text = ""
+        text += "PV : %s" % self.imageaddr[newunit]
+        text += "\n"
+        text += "Status = %s\n" % self.NICETEXT[self.status[newunit]]
+        text += "Status Text = %s\n" % self.statusText[newunit]
+        return "EPICS AreaDetector Image", text
+
+    def updateCallback(self, val, index):
+        # Used for epics callbacks
+        if val.ok == False:
+            self.status[index] = self.ERROR
+            self.imagedata = None
+            logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
+        else:
+            self.arraySize = val[0:3]
+        
+    def updateImageCallback(self,val,index):
+        if val.ok == False:
+            self.status[index] = self.ERROR
+            logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
+        else:
+            if self.arraySize is not None:
+                if self.arraySize[2] == 0:
+                    sz = self.arraySize[0:2][::-1]
+                    data = numpy.array(val[:sz.prod()],dtype = numpy.uint16)
+                    data = data.reshape(sz)
+                else:
+                    sz = self.arraySize[0:3][::-1]
+                    data = val[:sz.prod()]
+                    data = data.reshape(sz)
+                self.status[index] = self.ON
+                self.value[index] = data
+            else:
+                self.status[index] = self.ERROR
+                self.value[index] = numpy.ones
+                
+        self.emitCallback(unix = index)
+
+    def getValue(self, unit):
+        return self.value[unit]
+
+if __name__ == "__main__":
+    e = EpicsAreaDetectorImage(pvName = ['TARDIS:EXP:CCD:image1'])
+    e.init()
+    print e.getInformation(0)[1]
+    cothread.WaitForQuit()
