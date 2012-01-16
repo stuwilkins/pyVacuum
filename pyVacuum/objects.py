@@ -847,7 +847,7 @@ class pyVacCCDImage(pyVacObject):
                 # We are updating
                 self.plotWidget.setImage(self.value)
                 self.plotWidget.update()
-                print self.ringbuffer.nValues()
+                #print self.ringbuffer.nValues()
                 self.ringbufferSelect.setMaximum(self.ringbuffer.nValues())
                 self.ringbufferSelect.setValue(self.ringbuffer.nValues())
             else:
