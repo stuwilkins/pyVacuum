@@ -2,7 +2,7 @@
 
 # Form implementation generated from reading ui file 'pyVacuum/ui/graphaxes.ui'
 #
-# Created: Mon Jan 16 16:31:46 2012
+# Created: Mon Jan 16 20:43:15 2012
 #      by: PyQt4 UI code generator 4.9
 #
 # WARNING! All changes made in this file will be lost!

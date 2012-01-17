@@ -500,11 +500,11 @@ class EpicsIonPump(EpicsBase):
         
 
 class EpicsSwitch(EpicsBase):
-    def __init__(self, pvName = [None]):
+    def __init__(self, pvName = [None], fbkSuffix = ':fbk'):
         EpicsBase.__init__(self)
 
         self.opaddr = pvName
-        self.fbkaddr = [i + ":fbk" for i in pvName];
+        self.fbkaddr = [i + fbkSuffix for i in pvName];
        
         self.status = [self.ERROR for i in self.opaddr]
         self.statusMessage = ["Error" for i in self.opaddr]

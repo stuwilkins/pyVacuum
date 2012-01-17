@@ -747,17 +747,21 @@ class pyVacLCD(pyVacObject):
 class pyVacIndicator(pyVacObject):
     def __init__(self, parent, **kwargs):
         pyVacObject.__init__(self, parent, **kwargs)
-        self.resize(100, 80)
+        if kwargs.has_key('width') and kwargs.has_key('height'):
+            self.size = kwargs['width'], kwargs['height']
+        else:
+            self.size = 100,80
+        self.resize(self.size[0], self.size[1])
         self.move(kwargs['x'] - 50, kwargs['y'] - 40)
         self.active = False
-        self.setNameLabel(5, 50, QtCore.Qt.AlignCenter)
+        self.setNameLabel(5, 50, QtCore.Qt.AlignCenter, width = self.size[0] - 10)
         if kwargs.has_key('statustext'):
             self.text = kwargs['statustext']
         else:
             self.text = None
     
         self.indicator = QtGui.QLabel(self)
-        self.indicator.resize(90, 50)
+        self.indicator.resize(self.size[0]-10, self.size[1]-30)
         self.indicator.move(5,0)
         self.indicator.setAlignment(QtCore.Qt.AlignCenter)
         self.indicator.setText("UNK")

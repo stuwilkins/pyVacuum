@@ -68,9 +68,9 @@ class NavigationToolbarCustom(NavigationToolbar):
                            self.zoom)
         a.setToolTip('Zoom to rectangle')
 
-        #a = self.addAction(self._icon('hand.svg'), 'Select',
-        #                   self.pan)
-        #a.setToolTip('Select the nearest data point')
+        a = self.addAction(self._icon('hand.svg'), 'Select',
+                           self.pan)
+        a.setToolTip('Select center for lineouts')
 
         self.addSeparator()
 
@@ -127,7 +127,13 @@ class NavigationToolbarCustom(NavigationToolbar):
         self.plot.resetFullImage()
 
     def pan(self):
-        print "PAN" 
+        self._idRelease = self.canvas.mpl_disconnect(self._idRelease)
+        self._idRelease = self.canvas.mpl_connect(
+            'button_release_event', self.selectCtr)
+
+    def selectCtr(self,event):
+        self.plot.setImageCtr(event.xdata,event.ydata)
+        self._idRelease = self.canvas.mpl_disconnect(self._idRelease)
 
     def zoom(self):
         self.set_cursor(cursors.SELECT_REGION)
@@ -159,7 +165,7 @@ class CCDTwoDPlot(QtGui.QWidget):
 
         self.groupBox = QtGui.QGroupBox("Image Controls", self)
         self.groupBox.move(610,0)
-        self.groupBox.resize(150,600)
+        self.groupBox.resize(175,600)
         self.groupBox.show()
 
         self.autoScaleButtons = [QtGui.QRadioButton("Autoscale 10/90%", self.groupBox)]
@@ -205,7 +211,7 @@ class CCDTwoDPlot(QtGui.QWidget):
         self.imageCtr = (-1,-1)
         
         self.showCrosshairs = True
-        self.mouseMode = 'pick'
+        
         self.fullImage = None
         self.image = None
         self.currentRoi = None
@@ -250,6 +256,10 @@ class CCDTwoDPlot(QtGui.QWidget):
         self.image = self.fullImage
         self.currentRoi = [0,self.image.shape[0],0,self.image.shape[1]]
 
+    def setImageCtr(self,x,y):
+        self.imageCtr = [x,y]
+        self.update()
+
     def update(self):
         if self.image is not None:
             self._update()
@@ -292,8 +302,10 @@ class CCDTwoDPlot(QtGui.QWidget):
         self.axesb.yaxis.set_major_locator(MaxNLocator(3))
 
         if self.showCrosshairs:
-            self.axesl.axhline(cpointx, linewidth = 1, color = 'g')
-            self.axesb.axvline(cpointy, linewidth = 1, color = 'g')
+            self.axes.axhline(cpointy, linewidth = 1, color = 'k')
+            self.axes.axvline(cpointx, linewidth = 1, color = 'k')
+            self.axesl.axhline(cpointy, linewidth = 2, color = 'g')
+            self.axesb.axvline(cpointx, linewidth = 2, color = 'g')
 
         self.canvas.draw()
 
