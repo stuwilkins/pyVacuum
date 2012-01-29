@@ -148,8 +148,8 @@ class CCDTwoDPlot(QtGui.QWidget):
         self.canvas = FigureCanvas(self.fig)
         self.canvas.setParent(self)
         self.axes = self.fig.add_axes([0.2,0.175,0.725,0.725],axisbg='k')
-        self.axesl = self.fig.add_axes([0.075,0.175,0.10,0.725],axisbg='k')
-        self.axesb = self.fig.add_axes([0.2,0.05,0.725,0.10],axisbg='k')
+        self.axesl = self.fig.add_axes([0.075,0.175,0.125,0.725],axisbg='k')
+        self.axesb = self.fig.add_axes([0.2,0.05,0.725,0.125],axisbg='k')
 
         for ax in self.axes,self.axesl,self.axesb:
              ax.xaxis.set_ticklabels([])
@@ -160,6 +160,10 @@ class CCDTwoDPlot(QtGui.QWidget):
         # Setup move connection
 
         self.canvas.mpl_connect('motion_notify_event', self.motionNotify)
+
+        # Setup defaults
+
+        self.title = None
 
         # Setup widgets for controls
 
@@ -173,23 +177,27 @@ class CCDTwoDPlot(QtGui.QWidget):
         self.autoScaleButtons[-1].setChecked(True)
         self.autoScaleButtons.append(QtGui.QRadioButton("Autoscale 5/95%", self.groupBox))
         self.autoScaleButtons[-1].move(5,100)
-        self.autoScaleButtons.append(QtGui.QRadioButton("Autoscale Full", self.groupBox))
+        self.autoScaleButtons.append(QtGui.QRadioButton("Autoscale 2/98%", self.groupBox))
         self.autoScaleButtons[-1].move(5,130)
-        self.autoScaleButtons.append(QtGui.QRadioButton("Manual", self.groupBox))
+        self.autoScaleButtons.append(QtGui.QRadioButton("Autoscale 1/99%", self.groupBox))
         self.autoScaleButtons[-1].move(5,160)
+        self.autoScaleButtons.append(QtGui.QRadioButton("Autoscale Full", self.groupBox))
+        self.autoScaleButtons[-1].move(5,190)
+        self.autoScaleButtons.append(QtGui.QRadioButton("Manual", self.groupBox))
+        self.autoScaleButtons[-1].move(5,220)
 
         for button in self.autoScaleButtons:
             self.connect(button,QtCore.SIGNAL('clicked()'),
                          self.update)
 
         self.manualScaleLwrLabel = QtGui.QLabel("Lower Level (%)", self.groupBox)
-        self.manualScaleLwrLabel.move(5,200)
+        self.manualScaleLwrLabel.move(5,260)
         self.manualScaleLwrLabel.resize(130,25)
         self.manualScaleUprLabel = QtGui.QLabel("Lower Level (%)", self.groupBox)
-        self.manualScaleUprLabel.move(5,250)
+        self.manualScaleUprLabel.move(5,310)
         self.manualScaleUprLabel.resize(130,25)
         self.manualScaleLwr = QtGui.QSlider(QtCore.Qt.Horizontal, self.groupBox)
-        self.manualScaleLwr.move(5,225)
+        self.manualScaleLwr.move(5,285)
         self.manualScaleLwr.resize(130,25)
         self.manualScaleLwr.setMaximum(100)
         self.manualScaleLwr.setMinimum(0)
@@ -197,7 +205,7 @@ class CCDTwoDPlot(QtGui.QWidget):
         self.connect(self.manualScaleLwr,QtCore.SIGNAL('valueChanged(int)'),
                      self.manualScaleLwrChanged)
         self.manualScaleUpr = QtGui.QSlider(QtCore.Qt.Horizontal, self.groupBox)
-        self.manualScaleUpr.move(5,275)
+        self.manualScaleUpr.move(5,335)
         self.manualScaleUpr.resize(130,25)
         self.manualScaleUpr.setMaximum(100)
         self.manualScaleUpr.setMinimum(0)
@@ -205,8 +213,8 @@ class CCDTwoDPlot(QtGui.QWidget):
         self.connect(self.manualScaleUpr,QtCore.SIGNAL('valueChanged(int)'),
                      self.manualScaleUprChanged)
 
-        self.autoscaleLwr = [10,5,0,0]
-        self.autoscaleUpr = [90,95,100,100]
+        self.autoscaleLwr = [10,5,2,1,0,0]
+        self.autoscaleUpr = [90,95,98,99,100,100]
 
         self.imageCtr = (-1,-1)
         
@@ -231,6 +239,10 @@ class CCDTwoDPlot(QtGui.QWidget):
             self.resetFullImage()
         else:
             self.updateRoi()
+
+    def setTitle(self, title):
+        """Set the title of the plot"""
+        self.title = title
 
     def setRoi(self, roiStart, roiEnd):
         roi = []
@@ -275,6 +287,8 @@ class CCDTwoDPlot(QtGui.QWidget):
                          vmax = vmax,
                          extent = extent)
         self.forceAspect()
+        if self.title is not None:
+            self.axes.set_title(self.title, fontsize = 10)
 
         cpointx = self.imageCtr[0]
         if (cpointx < 0) or (cpointx >= self.image.shape[0]):
@@ -283,8 +297,8 @@ class CCDTwoDPlot(QtGui.QWidget):
         if (cpointy < 0) or (cpointy >= self.image.shape[1]):
             cpointy = self.image.shape[1] / 2.0
             
-        lv = self.image[:,int(cpointy)]
-        bv = self.image[int(cpointx),:]
+        lv = self.image[:,int(cpointx)]
+        bv = self.image[int(cpointy),:]
 
         self.axes.xaxis.set_ticklabels([])
         self.axes.yaxis.set_ticklabels([])

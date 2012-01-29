@@ -163,7 +163,6 @@ class pyVacWindow(QtGui.QMainWindow):
             self.connected = False
             self.connectAction.setIcon(self.flashIcon[1])
 
-
     def closeEvent(self, ev):
         for t in  self.centralWidget().thread:
             t.stop()
@@ -198,6 +197,13 @@ class pyVac(QtGui.QWidget):
         else:
             self.dumpTimer = None
 
+        # Setup timer for periodic updates
+
+        self.timer = QtCore.QTimer(self)
+        self.timer.setInterval(10 * 1000)
+        self.connect(self.timer, QtCore.SIGNAL('timeout()'),
+                     self.updateAll)
+
         # Load Controllers from Config File
 
         self.controllers = config.controllers
@@ -221,6 +227,8 @@ class pyVac(QtGui.QWidget):
                 if c.needsPolling:
                     self.thread.append(pyVacThread(controller = c))
                     self.thread[-1].start()
+
+        self.timer.start()
 
     def callbackFromObject(self):
         self.parentWidget().statusBar().showMessage("Last Updated: %s" % time.asctime())
@@ -296,8 +304,7 @@ class pyVac(QtGui.QWidget):
         return True
 
     def dumpWidget(self):
-
-        pixmap = QtGui.QPixmap.grabWidget(self)
+        pixmap = QtGui.QPixmap.grabWidget(self.parentWidget())
         if config.process_image is not None:
             pixmap.save(config.process_image) 
 
@@ -305,8 +312,7 @@ class pyVac(QtGui.QWidget):
         # Update all objects by calling update()
         for n in self.objects:
             n.updateFromController()
-
-        # Write a line in the log file
+        self.parentWidget().statusBar().showMessage("Forced Update at: %s" % time.asctime())
 
     def paintEvent(self, ev):
         p = QtGui.QPainter(self)

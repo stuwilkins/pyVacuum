@@ -574,7 +574,7 @@ class EpicsPV(EpicsBase):
         
         self.status = [self.ERROR for i in self.ipaddr]
         self.value = [0.0 for i in self.ipaddr]
-        self.statusText = ["" for i in self.ipaddr]
+        self.statusMessage = ["" for i in self.ipaddr]
         self.units = ["Unk" for i in self.ipaddr]
 
         if pvNameOut is None:
@@ -601,7 +601,7 @@ class EpicsPV(EpicsBase):
         text += "PV : %s" % self.ipaddr[newunit]
         text += "\n"
         text += "Status = %s\n" % self.NICETEXT[self.status[newunit]]
-        text += "Status Text = %s\n" % self.statusText[newunit]
+        text += "Status Text = %s\n" % self.statusMessage[newunit]
         text += "Val = %s\n" % str(self.value[newunit])
         text += "Units = %s\n" % self.units[newunit]
         if self.isSettableValue[newunit]:
@@ -620,7 +620,7 @@ class EpicsPV(EpicsBase):
 
             if hasattr(val, "enums"):
                 enum = val.enums
-                self.statusText[index] = enum[val]
+                self.statusMessage[index] = enum[val]
         
         self.status[index] = self.ON
         self.value[index] = val
@@ -637,6 +637,9 @@ class EpicsPV(EpicsBase):
 
     def getUnits(self, unit):
         return self.units[unit]
+
+    def getStatusMessage(self, unit):
+        return self.statusMessage[unit]
 
 class EpicsTurbo(EpicsBase):
     def __init__(self, pvName = [None]):
@@ -745,12 +748,14 @@ class EpicsAreaDetectorImage(EpicsBase):
 
         self.dimsaddr = [i + ":Dimensions_RBV" for i in pvName]
         self.imageaddr = [i + ":ArrayData" for i in pvName]
+        self.typeaddr = [i + ":DataType_RBV" for i in pvName]
        
         self.status = [self.ERROR for i in pvName]
         self.statusText = ["Error" for i in pvName]
         
         self.arraySize = [None for i in pvName]
         self.value = [None for i in pvName]
+        self.arrayType = [None for i in pvName]
 
         self.initialized = False
 
@@ -758,6 +763,7 @@ class EpicsAreaDetectorImage(EpicsBase):
         # Setup callbacks for EPICS PVs
         self.addEpicsCallback(self.dimsaddr, self.updateCallback)
         self.addEpicsCallback(self.imageaddr, self.updateImageCallback)
+        self.addEpicsCallback(self.typeaddr, self.updateTypeCallback)
         self.initialized = True
         return True
 
@@ -769,6 +775,35 @@ class EpicsAreaDetectorImage(EpicsBase):
         text += "Status = %s\n" % self.NICETEXT[self.status[newunit]]
         text += "Status Text = %s\n" % self.statusText[newunit]
         return "EPICS AreaDetector Image", text
+
+    def updateTypeCallback(self, val, index):
+        if val.ok == False:
+            self.status[index] = self.ERROR
+            self.imagedata = None
+            logging.warning("Error on EPICS callback for %s error = %s", val.name, str(val))
+        else:
+            if hasattr(val,"enums"):
+                atyp = val.enums[val]
+                print "Type = ", atyp
+                if atyp == "Float64":
+                    self.arrayType[index] = numpy.float64
+                elif atyp == "Float32":
+                    self.arrayType[index] = numpy.float32
+                elif atyp == "UInt32":
+                    self.arrayType[index] = numpy.uint32
+                elif atyp == "Int32":
+                    self.arrayType[index] = numpy.int32
+                elif atyp == "UInt16":
+                    self.arrayType[index] = numpy.uint16
+                elif atyp == "Int16":
+                    self.arrayType[index] = numpy.int16
+                elif atyp == "UInt8":
+                    self.arrayType[index] = numpy.uint8
+                elif atyp == "Int8":
+                    self.arrayType[index] = numpy.int8
+                else:
+                    logging.warning("Invalid data type %s", atyp)
+                    self.arrayType[index] = None
 
     def updateCallback(self, val, index):
         # Used for epics callbacks
@@ -787,18 +822,26 @@ class EpicsAreaDetectorImage(EpicsBase):
             if self.arraySize is not None:
                 if self.arraySize[2] == 0:
                     sz = self.arraySize[0:2][::-1]
-                    data = numpy.array(val[:sz.prod()],dtype = numpy.uint16)
+                    if self.arrayType is not None:
+                        data = numpy.array(val[:sz.prod()], 
+                                           dtype = self.arrayType[index])
+                    else:
+                        data = numpy.array(val[:sz.prod()])
                     data = data.reshape(sz)
                 else:
                     sz = self.arraySize[0:3][::-1]
-                    data = val[:sz.prod()]
+                    if self.arrayType is not None:
+                        data = array(val[:sz.prod()],
+                                     dtype = self.arrayType[index])
+                    else:
+                        data = array(val[:sz.prod()])
                     data = data.reshape(sz)
                 self.status[index] = self.ON
                 self.value[index] = data
             else:
                 self.status[index] = self.ERROR
                 self.value[index] = numpy.ones
-                
+
         self.emitCallback(unix = index)
 
     def getValue(self, unit):

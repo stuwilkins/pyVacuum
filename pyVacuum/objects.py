@@ -478,7 +478,6 @@ class pyVacValve(pyVacObject):
         pyVacObject.__init__(self, parent, format = "%d", **kwargs)
 
         self.type = type
-        self.buffer = QtGui.QPixmap()
         self.resize(100,100)
         self.move(kwargs['x'] - 50, kwargs['y'] - 50)
         self.setNameLabel(5, 80, QtCore.Qt.AlignCenter)
@@ -703,7 +702,7 @@ class pyVacStatusMessage(pyVacObject):
         self.setStatusLabel(0,0, 
                             align = QtCore.Qt.AlignCenter,
                             width = kwargs['xsize'], height = kwargs['ysize'],
-                            fontsize = 20, frame = True)
+                            fontsize = 16, frame = True)
         self.statusLabel.show()
 
 class pyVacLCD(pyVacObject):
@@ -817,8 +816,8 @@ class pyVacCCDImage(pyVacObject):
         self.ringbufferSelect.setMinimum(0)
         self.ringbufferSelect.setMaximum(0)
         self.ringbufferSelect.setValue(0)
-        self.connect(self.ringbufferSelect,QtCore.SIGNAL('valueChanged(int)'),
-                     self.ringbufferChanged)
+        #self.connect(self.ringbufferSelect,QtCore.SIGNAL('valueChanged(int)'),
+        #             self.ringbufferChanged)
         self.ringbufferChanged(0)
 
     def updateCheckBoxChanged(self, val):
@@ -842,6 +841,7 @@ class pyVacCCDImage(pyVacObject):
 
         if rbval:
             self.plotWidget.setImage(rbval[1])
+            self.plotWidget.setTitle('Image %d' % val)
         
         self.plotWidget.update()
         
@@ -850,7 +850,11 @@ class pyVacCCDImage(pyVacObject):
             if self.ringbufferSelect.maximum() == self.ringbufferSelect.value():
                 # We are updating
                 self.plotWidget.setImage(self.value)
-                self.plotWidget.update()
+                self.plotWidget.setTitle(time.asctime(self.lastUpdate))
+                try:
+                    self.plotWidget.update()
+                except:
+                    print "Unexpected error:", sys.exc_info()[0]
                 #print self.ringbuffer.nValues()
                 self.ringbufferSelect.setMaximum(self.ringbuffer.nValues())
                 self.ringbufferSelect.setValue(self.ringbuffer.nValues())

@@ -23,7 +23,7 @@ import config
 
 def setupLog(name):
     logging = log.getLogger(name)
-    logging.setLevel(log.WARN)
+    logging.setLevel(log.DEBUG)
     ch = log.StreamHandler()
     ch.setLevel(log.WARN)
     formatter = log.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')

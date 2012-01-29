@@ -23,9 +23,8 @@ import urllib
 
 from objects import *
 
-import logging as log
-#log.basicConfig(stream = sys.stderr, level = log.DEBUG)
-logging = log.getLogger(__name__)
+from ..log import setupLog
+logging = setupLog(__name__)
 
 import sgmllib
 
@@ -124,9 +123,8 @@ class NSLSDeviceReadings:
             return (False, 0.0)
 
         s = r.read().splitlines()
-
+        
         if type < 6:
-
             try:
                 val = float(s[0])
             except:
@@ -134,7 +132,6 @@ class NSLSDeviceReadings:
                 return (False, 0.0)
 
             return (True, val)
-
         else:
             return (True, s[0].strip())
 
@@ -142,7 +139,7 @@ class NSLSRingChannel2(VacObject):
     def __init__(self, host = None):
         VacObject.__init__(self)
         self.chan2 = NSLSChan2(host = ('130.199.195.17',80))
-    
+        self.status = self.ERROR
     def update(self):
         a,b = self.chan2.getMessage()
         if a == True:
@@ -150,7 +147,7 @@ class NSLSRingChannel2(VacObject):
             self.statusMessage = b
         else:
             self.status = self.OFF
-        self.emitCallback()
+        #self.emitCallback()
 
     def getUnits(self, unit):
         return ""
@@ -207,7 +204,7 @@ class NSLSRingStatus(VacObject):
         else:
             self.status = self.ERROR
         
-        self.emitCallback()
+        #self.emitCallback()
         return True
 
     def getUnits(self, unit):
@@ -228,11 +225,11 @@ class NSLSRingStatus(VacObject):
 if __name__ == "__main__":
     # Do a test
     
-    #a = NSLSDeviceReadings()
-    #print a.getReading(NSLSDeviceReadings.XRMESS)
+    a = NSLSDeviceReadings()
+    print a.getReading(NSLSDeviceReadings.XRMESS)
 
-    b = NSLSChan2(host = ('130.199.195.17',80))
-    print b.getMessage()
+    #b = NSLSChan2(host = ('130.199.195.17',80))
+    #print b.getMessage()
     
     
 
